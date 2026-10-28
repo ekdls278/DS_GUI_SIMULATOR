@@ -75,6 +75,21 @@ Actions 결과물의 `validation/build-info.json`에서 확인합니다.
 10. `저장`으로 시나리오를 JSON에 저장하고 `불러오기`로 복원할 수 있습니다.
     로그는 송수신 화면에서 검색·연결·방향으로 필터링한 결과를 JSON/CSV로 내보냅니다.
 
+## 서버와 접속 클라이언트 표시
+
+ICD 송수신 화면 왼쪽의 소켓 현황에서 TCP 서버는 **굵은 테두리의 박스**로 표시합니다.
+서버가 여러 개면 테두리 색과 서버 ID로 구분하며, 박스 상단에 서버의 Local IP:Port와 대기 상태를 표시합니다.
+그 아래 트리에서 접속 클라이언트의 Remote IP:Port와 소켓 ID를 확인하고 접고 펼칠 수 있습니다.
+
+- 클라이언트 행을 클릭하면 해당 서버의 정확한 Accepted 소켓을 송신 대상으로 선택합니다.
+- 대상을 바꾸면 ICD 선택이 초기화됩니다. 메시지를 다시 확인하고 송신하세요.
+- 서버 박스 상단을 누르면 클라이언트 선택이 해제됩니다. Listen 소켓에는 송신하지 않습니다.
+- 서버를 중지하면 하위 클라이언트 목록과 송신 대상이 함께 해제됩니다.
+- `0.0.0.0`은 내 PC의 모든 인터페이스를 뜻합니다. 실제 NIC 주소 하나를 의미하지 않습니다.
+- TCP Client와 UDP는 얇은 테두리의 별도 카드로 표시합니다. 별도 소켓 상세 메뉴의 수치 표는 유지합니다.
+
+![서버 두 개의 접속 클라이언트 트리 예시](docs/prototype-server-tree.png)
+
 ## 연결과 설정 저장
 
 - TCP Client, TCP Server, UDP의 모의 연결을 지원합니다. 새 프로파일은 `소켓 프로파일 추가`로 만듭니다.
@@ -119,6 +134,7 @@ Actions 결과물의 `validation/build-info.json`에서 확인합니다.
 src/ds_simulator/
   app.py              # 창, 메뉴, ICD 정의, 소켓 상세, 실행 CLI
   workspace.py        # 소켓 선택과 수동 송신 화면
+  connection_cards.py # 서버별 박스와 Accepted 클라이언트 트리
   scenario_editor.py  # 블록 편집 UI, 속성, 저장/불러오기
   domain.py           # Qt와 독립된 블록/시나리오, 검사, JSON 저장
   runtime.py          # 공통 MockTransport, 취소 가능한 QTimer 실행기
@@ -142,7 +158,7 @@ uv run ds-simulator --preview-stage ready --screenshot workspace.png
 ```
 
 디스플레이 없는 Linux에서는 `QT_QPA_PLATFORM=offscreen`을 설정합니다.
-22개 테스트로 모델·파일 검사, 중첩 반복 순서, 중지, 연결 해제 오류,
+27개 테스트로 모델·파일 검사, 중첩 반복 순서, 중지, 연결 해제 오류,
 수동·시나리오 공통 로그, GUI 편집·저장 복원·필터 내보내기를 확인했습니다.
 드래그의 마우스 조작과 Windows 네이티브 파일 대화상자는 별도 수동 확인 대상입니다.
 기존 정적 시안은 [이전 GUI 이미지 모음](docs/GUI_PREVIEW.md)에 남아 있습니다.

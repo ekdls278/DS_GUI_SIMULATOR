@@ -65,11 +65,7 @@ class ProfileMixin:
         self.sockets = []
         self.selected_peers.clear()
         self.selected_connection_index = 0
-        for control in list(self.connection_buttons.values()):
-            self.connection_group.removeButton(control)
-            self.connection_list.removeWidget(control)
-            control.deleteLater()
-        self.connection_buttons.clear()
+        self.clear_connection_cards()
         self.log_connection_filter.blockSignals(True)
         self.socket_connection_filter.blockSignals(True)
         self.log_connection_filter.clear()

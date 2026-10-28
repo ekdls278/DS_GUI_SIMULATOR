@@ -14,7 +14,7 @@ from PySide6.QtWidgets import QApplication
 
 from ds_simulator.app import SimulatorWindow
 from ds_simulator.domain import Scenario, Step
-from ds_simulator.preview_data import CONNECTIONS, SOCKETS
+from ds_simulator.preview_data import CONNECTIONS, SOCKETS, ConnectionPreview
 from ds_simulator.runtime import MockTransport, ScenarioRunner
 from ds_simulator.scenario_editor import ROLE
 from ds_simulator.theme import STYLESHEET
@@ -117,6 +117,92 @@ class GuiTests(unittest.TestCase):
         self.window.message_catalog.setCurrentRow(0)
         APP.processEvents()
         self.assertTrue(self.window.send_button.isEnabled())
+
+    def click_peer(self, card, index):
+        item = card.root.child(index)
+        card.root.setExpanded(True)
+        card.tree.scrollToItem(item)
+        APP.processEvents()
+        QTest.mouseClick(card.tree.viewport(), Qt.MouseButton.LeftButton, pos=card.tree.visualItemRect(item).center())
+        APP.processEvents()
+
+    def test_server_tree_selects_exact_client_and_header_is_not_send_target(self):
+        self.window.select_connection(2)
+        card = self.window.connection_cards['SRV-01']
+        self.assertTrue(card.is_server)
+        self.assertIn('0.0.0.0:7000', card.header.text())
+        self.assertEqual(card.root.childCount(), 2)
+        self.assertIn('192.168.0.21:51001', card.root.child(0).text(0))
+        self.assertIn('192.168.0.22:51002', card.root.child(1).text(0))
+        self.assertFalse(self.window.send_button.isEnabled())
+        self.click_peer(card, 1)
+        self.assertEqual(self.window.current_socket().identifier, 'SOCK-005')
+        self.window.message_catalog.setCurrentRow(0)
+        QTest.mouseClick(self.window.send_button, Qt.MouseButton.LeftButton)
+        self.assertEqual(self.window.log_events[0]['peer'], '192.168.0.22:51002')
+        self.click_peer(card, 0)
+        self.assertIsNone(self.window.selected_message_name)
+        self.assertFalse(self.window.send_button.isEnabled())
+        self.assertEqual(self.window.current_socket().identifier, 'SOCK-004')
+        QTest.mouseClick(card.header, Qt.MouseButton.LeftButton)
+        self.assertIsNone(self.window.current_socket())
+        self.assertEqual(card.tree.selectedItems(), [])
+
+    def test_multiple_servers_have_separate_children_and_borders(self):
+        self.window.add_connection_preview(ConnectionPreview('SRV-02', '두 번째 서버', 'TCP Server', '127.0.0.1:7100'))
+        second = self.window.connection_cards['SRV-02']
+        first = self.window.connection_cards['SRV-01']
+        self.assertNotEqual(first.accent, second.accent)
+        self.assertIn('3px solid', second.styleSheet())
+        self.assertEqual(second.root.childCount(), 0)
+        self.window.toggle_preview_connection()
+        self.window.accept_preview_peer()
+        self.assertEqual(second.root.childCount(), 1)
+        self.assertEqual(first.root.childCount(), 2)
+        self.assertEqual(self.window.current_socket().connection_id, 'SRV-02')
+        self.click_peer(first, 0)
+        self.assertEqual(self.window.selected_connection().identifier, 'SRV-01')
+        self.assertEqual(self.window.current_socket().identifier, 'SOCK-004')
+        self.assertEqual(second.tree.selectedItems(), [])
+
+    def test_server_stop_and_restart_remove_stale_children_and_selection(self):
+        self.window.select_connection(2)
+        card = self.window.connection_cards['SRV-01']
+        self.click_peer(card, 0)
+        self.window.message_catalog.setCurrentRow(0)
+        self.window.toggle_preview_connection()
+        self.assertEqual(card.root.childCount(), 0)
+        self.assertIn('서버 중지', card.header.text())
+        self.assertFalse(self.window.send_button.isEnabled())
+        self.window.toggle_preview_connection()
+        self.assertIn('LISTENING', card.header.text())
+        self.assertIsNone(self.window.current_socket())
+        self.window.accept_preview_peer()
+        self.assertEqual(card.root.childCount(), 1)
+        self.assertEqual(self.window.current_socket().identifier, card.root.child(0).data(0, Qt.ItemDataRole.UserRole))
+
+    def test_disappearing_peer_clears_tree_and_composer_target(self):
+        self.window.select_connection(2)
+        card = self.window.connection_cards['SRV-01']
+        self.click_peer(card, 0)
+        self.window.message_catalog.setCurrentRow(0)
+        self.window.sockets = [s for s in self.window.sockets if s.identifier != 'SOCK-004']
+        self.window.refresh_socket_monitor()
+        self.assertEqual(card.root.childCount(), 1)
+        self.assertIsNone(self.window.current_socket())
+        self.assertIsNone(self.window.selected_message_name)
+        self.assertFalse(self.window.send_button.isEnabled())
+
+    def test_profile_reload_replaces_server_card_groups_without_duplicate_widgets(self):
+        old_card = self.window.connection_cards['SRV-01']
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'connections.json'
+            self.window.save_profiles_to(path)
+            self.window.load_profiles_from(path)
+        self.assertIsNot(self.window.connection_cards['SRV-01'], old_card)
+        self.assertEqual(len(self.window.connection_cards), 4)
+        self.assertEqual(self.window.connection_list.count(), 5)  # four cards and stretch
+        self.assertEqual(self.window.connection_cards['SRV-01'].root.childCount(), 0)
 
     def test_manual_send_validation_and_actual_values_in_log(self):
         self.connect_first()

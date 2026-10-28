@@ -21,11 +21,20 @@
 
 ## Windows 패키징
 
-`.github/workflows/windows-executable.yml`은 Windows x64에서 22개 테스트를 실행하고
+`.github/workflows/windows-executable.yml`은 Windows x64에서 27개 테스트를 실행하고
 `packaging/build_windows.py`로 PyInstaller onefile EXE를 만듭니다. EXE 파일 하나만 새 임시 폴더에 복사하여
 workspace/scenario PNG 생성을 확인한 뒤 EXE·SHA-256을 GitHub prerelease에 올립니다.
 Python 설치, 압축 해제, 추가 폴더 없이 EXE 하나로 실행합니다.
 실제 장비와 Windows 대화형 GUI의 모든 조작을 검증하는 과정은 별도로 필요합니다.
+
+## 서버 소켓 트리
+
+`connection_cards.py`의 ConnectionCard/PeerTree를 통합 송수신 화면에 사용합니다.
+TCP 서버는 굵은 테두리와 서로 다른 강조색, Local 주소, 하위 Accepted 소켓으로 묶습니다.
+`selected_peers[connection_id]`가 선택의 기준이며 별도의 클라이언트 콤보박스는 제거했습니다.
+상위 서버 헤더를 클릭하면 하위 선택을 해제합니다. 프로파일 복원 시 카드 전체를 교체합니다.
+정확한 송신 대상, 다중 서버, 서버 중지/재시작, 접속 소멸, 프로파일 복원 GUI 검사를 추가했습니다.
+화면 예시는 `docs/prototype-server-tree.png`에 있습니다. 실제 통신은 여전히 미구현입니다.
 
 ## 다음 단계
 
@@ -49,7 +58,7 @@ UDP IPv4 단일 페이로드 최대 65,507바이트이므로 64KiB 메시지는 
 고속 수신은 수신/해석/저장/화면 갱신 분리 및 실제 Windows 부하 시험이 필요합니다.
 
 검증: `QT_QPA_PLATFORM=offscreen uv run python -m unittest discover -s tests -v`
-22개 테스트가 있으며 Linux Qt offscreen에서 통과했습니다.
+27개 테스트가 있으며 Linux Qt offscreen에서 통과했습니다.
 현재 UI 캡처: `docs/prototype-workspace.png`, `docs/prototype-scenario.png`.
 Windows 대화형 수동 조작·실장비·10G·FFT·계측기 검증은 아직 수행하지 않았습니다.
 Windows CI에서 전체 테스트와 frozen EXE의 offscreen 실행을 검사합니다.

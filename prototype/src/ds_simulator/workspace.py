@@ -3,13 +3,14 @@
 from PySide6.QtCore import QRegularExpression, Qt
 from PySide6.QtGui import QRegularExpressionValidator
 from PySide6.QtWidgets import (
-    QButtonGroup, QCheckBox, QComboBox, QFormLayout, QFrame, QHBoxLayout, QLineEdit,
-    QListWidget, QListWidgetItem, QPushButton, QScrollArea, QTabWidget,
+    QButtonGroup, QCheckBox, QFormLayout, QFrame, QHBoxLayout, QLineEdit,
+    QListWidget, QListWidgetItem, QScrollArea, QTabWidget,
     QVBoxLayout, QWidget,
 )
 
 from .preview_data import MESSAGES, SocketPreview
 from .domain import Step, validate_message
+from .connection_cards import ConnectionCard, SERVER_COLORS
 from .theme import BLUE
 from .widgets import Card, button, chip, label, row
 
@@ -55,11 +56,13 @@ class WorkspaceMixin:
         self.connection_summary = label("프로파일 04개  ·  상태 예시", "caption")
         body.addWidget(self.connection_summary)
         self.connection_group = QButtonGroup(card)
+        self.connection_cards = {}
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setStyleSheet("QScrollArea, QScrollArea > QWidget > QWidget { background: white; }")
-        scroll.setMinimumHeight(240)
+        scroll.setMinimumHeight(300)
+        self.connection_scroll = scroll
         items = QWidget()
         self.connection_list = QVBoxLayout(items)
         self.connection_list.setContentsMargins(0, 0, 3, 0)
@@ -69,12 +72,6 @@ class WorkspaceMixin:
             self.append_connection_button(index, connection)
         scroll.setWidget(items)
         body.addWidget(scroll, 1)
-        self.peer_combo = QComboBox()
-        self.peer_combo.setObjectName("serverPeer")
-        self.peer_combo.setMinimumContentsLength(16)
-        self.peer_combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
-        self.peer_combo.currentIndexChanged.connect(self.select_peer)
-        body.addWidget(self.peer_combo)
         self.connect_button = button("연결", primary=True, icon_name="link")
         self.connect_button.setToolTip("화면에서 연결 상태만 변경합니다. 실제 소켓은 생성하지 않습니다.")
         self.connect_button.clicked.connect(self.toggle_preview_connection)
@@ -102,32 +99,49 @@ class WorkspaceMixin:
         add = button("소켓 프로파일 추가", icon_name="plus")
         add.clicked.connect(self.show_connection_dialog)
         card.body.addWidget(add)
-        self.connection_group.idClicked.connect(self.select_connection)
+        self.connection_group.idClicked.connect(self.select_connection_header)
         return card
 
     def append_connection_button(self, index, connection):
-        control = QPushButton()
-        control.setObjectName("connection")
-        control.setCursor(Qt.CursorShape.PointingHandCursor)
-        control.setCheckable(True)
-        control.setMinimumHeight(70)
-        control.setStyleSheet("font-size: 11px; padding: 8px;")
-        self.connection_group.addButton(control, index)
-        self.connection_buttons[connection.identifier] = control
-        self.connection_list.insertWidget(self.connection_list.count() - 1, control)
+        server_number = sum(c.mode == "TCP Server" for c in self.connections[:index])
+        card = ConnectionCard(connection, SERVER_COLORS[server_number % len(SERVER_COLORS)])
+        card.peer_selected.connect(self.select_server_peer)
+        self.connection_cards[connection.identifier] = card
+        self.connection_buttons[connection.identifier] = card.header
+        self.connection_group.addButton(card.header, index)
+        self.connection_list.insertWidget(self.connection_list.count() - 1, card)
         self.refresh_connection_button(connection)
 
+    def clear_connection_cards(self):
+        for card in self.connection_cards.values():
+            self.connection_group.removeButton(card.header)
+            self.connection_list.removeWidget(card)
+            card.deleteLater()
+        self.connection_cards.clear()
+        self.connection_buttons.clear()
+
     def refresh_connection_button(self, connection):
-        sockets = self.connection_sockets(connection)
-        state = "미연결"
-        if sockets:
-            state = "접속 대기" if connection.mode == "TCP Server" else ("바인딩됨" if connection.mode == "UDP" else "연결됨")
-        local = sockets[0].local_endpoint if sockets else f"{connection.local_endpoint} (설정)"
-        remote = connection.remote_endpoint or f"접속 {len(self.server_peers(connection))}개"
-        control = self.connection_buttons[connection.identifier]
-        remote_label = "Target" if connection.mode == "UDP" else "Remote"
-        control.setText(f"{connection.title}  ·  {state}\nLocal    {local}\n{remote_label}  {remote}")
-        control.setToolTip(f"{connection.mode} · {state}\nLocal {local}\nRemote {remote}\n상태와 주소는 예시입니다.")
+        self.connection_cards[connection.identifier].update_snapshot(
+            connection, self.connection_sockets(connection), self.server_peers(connection),
+            self.selected_peers.get(connection.identifier),
+            self.selected_connection().identifier == connection.identifier,
+        )
+
+    def select_connection_header(self, index):
+        connection = self.connections[index]
+        if connection.mode == "TCP Server":
+            self.selected_peers.pop(connection.identifier, None)
+            self.clear_message_selection()
+        self.select_connection(index)
+
+    def select_server_peer(self, connection_id, socket_id):
+        index = next((i for i, c in enumerate(self.connections) if c.identifier == connection_id and c.mode == "TCP Server"), None)
+        if index is None or not any(p.identifier == socket_id for p in self.server_peers(self.connections[index])):
+            return
+        if self.selected_connection_index != index or self.selected_peers.get(connection_id) != socket_id:
+            self.clear_message_selection()
+        self.selected_peers[connection_id] = socket_id
+        self.select_connection(index)
 
     def make_message_catalog(self):
         card = Card("ICD 선택", "05")
@@ -229,7 +243,7 @@ class WorkspaceMixin:
     def current_socket(self):
         connection = self.selected_connection()
         if connection.mode == "TCP Server":
-            return next((s for s in self.server_peers(connection) if s.identifier == self.peer_combo.currentData()), None)
+            return next((s for s in self.server_peers(connection) if s.identifier == self.selected_peers.get(connection.identifier)), None)
         return next((s for s in self.connection_sockets(connection) if s.state in ("ESTABLISHED", "BOUND")), None)
 
     def select_connection(self, index):
@@ -240,24 +254,14 @@ class WorkspaceMixin:
         self.selected_connection_index = index
         connection = self.selected_connection()
         self.connection_group.button(index).setChecked(True)
-        self.peer_combo.blockSignals(True)
-        self.peer_combo.clear()
-        self.peer_combo.addItem("접속 클라이언트 선택", None)
-        peers = self.server_peers(connection)
-        for peer in peers:
-            self.peer_combo.addItem(f"{peer.identifier} · {peer.remote_endpoint}", peer.identifier)
         peer_id = self.selected_peers.get(connection.identifier)
-        index = self.peer_combo.findData(peer_id) if peer_id else 0
-        self.peer_combo.setCurrentIndex(max(0, index))
-        self.peer_combo.blockSignals(False)
-        self.peer_combo.setVisible(connection.mode == "TCP Server")
-        self.peer_combo.setEnabled(bool(peers))
+        if peer_id and not any(p.identifier == peer_id for p in self.server_peers(connection)):
+            self.selected_peers.pop(connection.identifier, None)
+            self.clear_message_selection()
+        for item in self.connections:
+            self.refresh_connection_button(item)
         self.update_send_button()
-
-    def select_peer(self, index):
-        self.clear_message_selection()
-        self.selected_peers[self.selected_connection().identifier] = self.peer_combo.currentData()
-        self.update_send_button()
+        self.connection_scroll.ensureWidgetVisible(self.connection_cards[connection.identifier])
 
     def clear_message_selection(self):
         self.selected_message_name = None

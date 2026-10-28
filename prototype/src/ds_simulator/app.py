@@ -302,6 +302,14 @@ class SimulatorWindow(WorkspaceMixin, ActivityMixin, ProfileMixin, QMainWindow):
             value.setText(f"{sum(s.state == state for s in self.sockets):02}")
         self.socket_count_label.setText(f"소켓 {len(self.sockets)}개 · 서버 대기 소켓과 접속 소켓을 구분합니다.")
         self.filter_sockets()
+        for connection in self.connections:
+            peer_id = self.selected_peers.get(connection.identifier)
+            if peer_id and not any(p.identifier == peer_id for p in self.server_peers(connection)):
+                self.selected_peers.pop(connection.identifier, None)
+                if self.selected_connection().identifier == connection.identifier:
+                    self.clear_message_selection()
+            self.refresh_connection_button(connection)
+        self.update_send_button()
 
     def filter_sockets(self):
         connection_id = self.socket_connection_filter.currentData()
