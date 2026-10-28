@@ -1,0 +1,22 @@
+DS Simulator Windows prototype - third-party components
+
+Python 3.12: Python Software Foundation License. The Python license is included
+when provided by the build interpreter.
+https://www.python.org/downloads/source/
+
+PySide6-Essentials, shiboken6, and Qt 6.8.3: used under the LGPLv3 terms.
+The LGPLv3 and incorporated GPLv3 texts are included in this directory.
+Qt libraries remain dynamically linked, replaceable files in _internal.
+No changes to these dependencies were made for this prototype.
+Corresponding upstream source:
+https://github.com/pyside/pyside-setup/tree/v6.8.3
+https://download.qt.io/archive/qt/6.8/6.8.3/single/qt-everywhere-src-6.8.3.tar.xz
+Qt licensing and third-party acknowledgements:
+https://doc.qt.io/qt-6.8/lgpl.html
+https://doc.qt.io/qt-6.8/licenses-used-in-qt.html
+
+PyInstaller: GPL with its bootloader exception permitting distribution of
+bundled applications under their own terms. Included distribution license
+files, when supplied, are copied into the PyInstaller subdirectory.
+https://pyinstaller.org/en/stable/license.html
+https://github.com/pyinstaller/pyinstaller

@@ -1,0 +1,83 @@
+name: Windows executable
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'prototype/**'
+      - '.github/workflows/windows-executable.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: prototype
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+          architecture: x64
+          cache: pip
+          cache-dependency-path: |
+            prototype/pyproject.toml
+            prototype/packaging/requirements-build.txt
+      - name: Install runtime and packaging tools
+        run: python -m pip install -e . -r packaging/requirements-build.txt
+      - name: Run tests on Windows
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m unittest discover -s tests -v
+      - name: Package and smoke-test the Windows executable
+        run: python packaging/build_windows.py
+      - name: Retain executable and validation evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: DS-Simulator-Windows-x64
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            prototype/dist/DS-Simulator-Windows-x64.zip
+            prototype/dist/DS-Simulator-Windows-x64.zip.sha256
+            prototype/dist/validation/
+
+  release:
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: DS-Simulator-Windows-x64
+          path: release-files
+      - name: Publish the tested prototype executable
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: prototype-windows-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          cat > release-notes.md <<'EOF'
+          Windows x64 모의 프로토타입입니다. Python 설치 없이 사용할 수 있습니다.
+
+          `DS-Simulator-Windows-x64.zip` 전체를 압축 해제한 뒤 `DS-Simulator/DS-Simulator.exe`를 실행하세요.
+          EXE와 `_internal` 폴더를 함께 유지하세요.
+
+          Windows에서 기존 테스트와 패키징된 EXE의 송수신·시나리오 화면 실행 검사를 통과한 빌드입니다.
+          실제 장비 통신·Excel ICD 변환·계측기 제어는 아직 구현하지 않았습니다.
+          EOF
+          gh release create "$RELEASE_TAG" \
+            release-files/DS-Simulator-Windows-x64.zip \
+            release-files/DS-Simulator-Windows-x64.zip.sha256 \
+            --target "$GITHUB_SHA" \
+            --title "DS Simulator Windows prototype (${GITHUB_SHA:0:7})" \
+            --notes-file release-notes.md \
+            --prerelease --latest=false

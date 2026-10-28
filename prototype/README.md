@@ -8,7 +8,19 @@ Python + PySide6로 만들었습니다. 기존 GUI 시안을 이어서 시나리
 
 ![ICD 송수신](docs/prototype-workspace.png)
 
-## Windows 실행
+## Windows 실행 파일 (Python 설치 불필요)
+
+[GitHub Releases](https://github.com/ekdls278/DS_GUI_SIMULATOR/releases)에서
+`DS-Simulator-Windows-x64.zip`을 받아 전체를 압축 해제하고
+`DS-Simulator/DS-Simulator.exe`를 실행하세요. EXE와 `_internal` 폴더를 함께 유지하세요.
+배포 파일은 Windows x64에서 테스트와 패키징된 프로그램의 화면 실행 검사를 통과하면 게시됩니다.
+모의 프로토타입의 기능과 제한은 소스 실행 버전과 같습니다.
+
+Windows 빌드 워크플로는 [Actions](https://github.com/ekdls278/DS_GUI_SIMULATOR/actions/workflows/windows-executable.yml)에서
+진행 상황을 확인하거나 `Run workflow`로 다시 실행할 수 있습니다.
+ZIP에 포함된 `build-info.json`에 빌드 커밋과 화면 실행 검사 결과가 들어 있습니다.
+
+## Windows 소스 실행
 
 Python 3.12를 설치하고 저장소 폴더에서 아래 명령을 실행하세요.
 첫 설치에는 패키지 다운로드를 위한 인터넷 연결이 필요합니다.
@@ -124,3 +136,18 @@ uv run ds-simulator --preview-stage ready --screenshot workspace.png
 수동·시나리오 공통 로그, GUI 편집·저장 복원·필터 내보내기를 확인했습니다.
 드래그의 마우스 조작과 Windows 네이티브 파일 대화상자는 별도 수동 확인 대상입니다.
 기존 정적 시안은 [이전 GUI 이미지 모음](docs/GUI_PREVIEW.md)에 남아 있습니다.
+
+## 실행 파일을 직접 빌드하기
+
+Windows x64의 Python 3.12 환경에서 `prototype` 폴더를 작업 폴더로 사용합니다.
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e . -r packaging/requirements-build.txt
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+.\.venv\Scripts\python.exe packaging/build_windows.py
+```
+
+결과는 `dist/DS-Simulator-Windows-x64.zip`이며 SHA-256 파일도 함께 생성됩니다.
+빌드 스크립트는 EXE를 소스 폴더 밖에서 실행해 송수신·시나리오 화면의 PNG 생성을 검사합니다.
+Linux에서 이 스크립트를 실행하면 Windows 빌드가 필요하다는 안내와 함께 중단합니다.

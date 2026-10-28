@@ -3,7 +3,8 @@
 **조작 가능한 기본 프로토타입:** [prototype/README.md](prototype/README.md)
 
 블록 편집·모의 실행·저장 기능이 추가된 버전은 `prototype/`에 있습니다.
-Windows에서는 `prototype/run-windows.cmd`를 실행하세요. 아래 내용은 기존 GUI 시안 안내입니다.
+Windows 실행 파일은 [Releases](https://github.com/ekdls278/DS_GUI_SIMULATOR/releases)에서 받습니다.
+소스로 실행하려면 `prototype/run-windows.cmd`를 사용하세요. 아래 내용은 기존 GUI 시안 안내입니다.
 
 Windows용 장비 모의 소프트웨어의 **GUI 검토용 프로토타입**입니다.
 현재 연결 상태, ICD, 메시지와 그래프는 모두 예시입니다. 소켓 연결, 실제 송수신,

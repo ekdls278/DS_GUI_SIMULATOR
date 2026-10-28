@@ -19,6 +19,14 @@
 - 시나리오에서 TCP 서버는 Accepted 소켓 ID를 지정합니다. 재시작 후 재선택이 필요합니다.
 - `examples/`의 시나리오와 연결 설정은 기본값을 복원하는 데 사용할 수 있습니다.
 
+## Windows 패키징
+
+`.github/workflows/windows-executable.yml`은 Windows x64에서 22개 테스트를 실행하고
+`packaging/build_windows.py`로 PyInstaller onedir EXE를 만듭니다. Frozen EXE를 임시 폴더에서
+실행하여 workspace/scenario PNG 생성을 확인한 뒤 ZIP·SHA-256을 GitHub prerelease에 올립니다.
+Python 설치 없이 사용할 수 있지만 EXE와 `_internal` 폴더를 함께 유지해야 합니다.
+실제 장비와 Windows 대화형 GUI의 모든 조작을 검증하는 과정은 별도로 필요합니다.
+
 ## 다음 단계
 
 1. Windows에서 화면 크기, 드래그 이동, 네이티브 파일 대화상자를 수동 검토합니다.
