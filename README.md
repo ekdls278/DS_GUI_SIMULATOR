@@ -8,6 +8,8 @@ Windows용 장비 모의 소프트웨어의 **GUI 검토용 프로토타입**입
 
 ## 화면
 
+[**GUI 이미지 10개 한눈에 보기**](docs/GUI_PREVIEW.md)
+
 ![통신 워크스페이스](docs/ui-workspace.png)
 
 - [ICD 메시지 화면](docs/ui-icd.png): 메시지 목록, SRC/DST/CMD 필드 정의와 헤더 표시
