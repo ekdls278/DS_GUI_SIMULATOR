@@ -304,6 +304,9 @@ class WorkspaceMixin:
 
     def update_send_button(self):
         connection = self.selected_connection()
+        listeners = sum(s.role == "Listen" and s.state == "LISTENING" for s in self.sockets)
+        accepted = sum(s.role == "Accepted" and s.state == "ESTABLISHED" for s in self.sockets)
+        self.connection_summary.setText(f"프로파일 {len(self.connections):02}개 · 대기 서버 {listeners} · 접속 클라이언트 {accepted}")
         sockets = self.connection_sockets(connection)
         current = self.current_socket()
         remote = current.remote_endpoint if current and connection.mode == "TCP Server" else connection.remote_endpoint
