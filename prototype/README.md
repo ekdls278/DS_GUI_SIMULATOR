@@ -4,6 +4,12 @@ Windows용 장비 시험 소프트웨어의 **조작 가능한 데스크톱 프�
 Python + PySide6로 만들었습니다. 기존 GUI 시안을 이어서 시나리오 편집, 모의 실행,
 파일 저장과 공통 로그를 구현했습니다. 실제 네트워크 소켓을 열거나 장비를 제어하지 않습니다.
 
+**[Windows 실행 파일 바로 다운로드 — ZIP](https://github.com/ekdls278/DS_GUI_SIMULATOR/releases/download/prototype-windows-40655566229-1/DS-Simulator-Windows-x64.zip)** · [릴리즈 상세](https://github.com/ekdls278/DS_GUI_SIMULATOR/releases/tag/prototype-windows-40655566229-1)
+
+ZIP 전체를 압축 해제한 뒤 **`DS-Simulator/DS-Simulator.exe`**를 더블클릭하세요.
+Python·VS Code·CMD 파일은 필요하지 않습니다. EXE와 `_internal` 폴더를 함께 유지하세요.
+실행 파일 배포본은 GitHub Releases에서 관리하며 이 폴더에는 개발 소스를 보관합니다.
+
 ![시나리오 편집기](docs/prototype-scenario.png)
 
 ![ICD 송수신](docs/prototype-workspace.png)
