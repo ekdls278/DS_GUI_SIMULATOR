@@ -41,8 +41,9 @@ uv sync --locked
 uv run ds-simulator
 ```
 
-Windows 실제 장비·배포 검증은 아직 수행하지 않았습니다.
-현재 검증 환경은 Linux / Python 3.12 / Qt offscreen입니다.
+대화형 Windows 사용과 실제 장비 검증은 별도로 필요합니다.
+Linux에서는 Python 3.12 / Qt offscreen으로 확인했고, Windows CI의 빌드별 검증 결과는
+배포 ZIP의 `build-info.json`과 Actions에서 확인합니다.
 
 ## 첫 사용 순서
 

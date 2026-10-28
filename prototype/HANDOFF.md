@@ -51,7 +51,9 @@ UDP IPv4 단일 페이로드 최대 65,507바이트이므로 64KiB 메시지는 
 검증: `QT_QPA_PLATFORM=offscreen uv run python -m unittest discover -s tests -v`
 22개 테스트가 있으며 Linux Qt offscreen에서 통과했습니다.
 현재 UI 캡처: `docs/prototype-workspace.png`, `docs/prototype-scenario.png`.
-Windows 실제 실행·실장비·10G·FFT·계측기 검증은 아직 수행하지 않았습니다.
+Windows 대화형 수동 조작·실장비·10G·FFT·계측기 검증은 아직 수행하지 않았습니다.
+Windows CI에서 전체 테스트와 frozen EXE의 offscreen 실행을 검사합니다.
+Windows에서 CSV 줄바꿈이 중복 변환되던 오류를 newline=""로 수정했으며 기존 내보내기 검사에 회귀 검증을 추가했습니다.
 현재 마우스 드래그 자체는 자동화하지 않았으며 이동 버튼/모델 순서/저장 복원을 검사했습니다.
 
 설치는 `uv sync --locked`, 실행은 `uv run ds-simulator`입니다.

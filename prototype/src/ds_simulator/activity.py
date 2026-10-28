@@ -126,7 +126,8 @@ class ActivityMixin:
                 for event in events:
                     values = self.log_row(event) + [event["socket_id"], json.dumps(event["values"], ensure_ascii=False), str(event["big_endian"])]
                     writer.writerow(["'" + v if v.startswith(("=", "+", "-", "@", "\t", "\r")) else v for v in values])
-                path.write_text(content.getvalue(), encoding="utf-8-sig")
+                with path.open("w", encoding="utf-8-sig", newline="") as stream:
+                    stream.write(content.getvalue())
             else:
                 save_json(path, {"format": "ds-mock-log", "version": 1, "events": events})
             self.statusBar().showMessage(f"모의 로그 {len(events)}건 저장: {path}", 6000)

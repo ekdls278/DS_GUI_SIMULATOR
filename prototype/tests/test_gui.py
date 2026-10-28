@@ -217,5 +217,6 @@ class GuiTests(unittest.TestCase):
                 self.window.export_log()
             with path.open(encoding='utf-8-sig', newline='') as stream:
                 rows = list(csv.reader(stream))
+            self.assertNotIn(b'\r\r\n', path.read_bytes())
             self.assertEqual(len(rows), 2)
             self.assertIn('MOCK', rows[1][7])
