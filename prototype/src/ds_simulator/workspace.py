@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
 
 from .preview_data import MESSAGES, SocketPreview
 from .domain import Step, validate_message
-from .connection_cards import ConnectionCard, SERVER_COLORS
+from .connection_cards import ConnectionCard
 from .theme import BLUE
 from .widgets import Card, button, chip, label, row
 
@@ -103,8 +103,7 @@ class WorkspaceMixin:
         return card
 
     def append_connection_button(self, index, connection):
-        server_number = sum(c.mode == "TCP Server" for c in self.connections[:index])
-        card = ConnectionCard(connection, SERVER_COLORS[server_number % len(SERVER_COLORS)])
+        card = ConnectionCard(connection)
         card.peer_selected.connect(self.select_server_peer)
         self.connection_cards[connection.identifier] = card
         self.connection_buttons[connection.identifier] = card.header

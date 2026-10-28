@@ -30,11 +30,13 @@ Python 설치, 압축 해제, 추가 폴더 없이 EXE 하나로 실행합니다
 ## 서버 소켓 트리
 
 `connection_cards.py`의 ConnectionCard/PeerTree를 통합 송수신 화면에 사용합니다.
-TCP 서버는 굵은 테두리와 서로 다른 강조색, Local 주소, 하위 Accepted 소켓으로 묶습니다.
+모든 역할을 공통 카드로 표시합니다. 역할 배지, 상태 배지, 선택 강조를 분리했습니다.
+서버만 굵은 테두리를 쓰지 않으며 선택한 연결만 공통 파란 테두리·배경을 사용합니다.
+서버의 Accepted 트리는 유지하고 현재 선택된 행에 송신 대상을 명시합니다.
 `selected_peers[connection_id]`가 선택의 기준이며 별도의 클라이언트 콤보박스는 제거했습니다.
 상위 서버 헤더를 클릭하면 하위 선택을 해제합니다. 프로파일 복원 시 카드 전체를 교체합니다.
 정확한 송신 대상, 다중 서버, 서버 중지/재시작, 접속 소멸, 프로파일 복원 GUI 검사를 추가했습니다.
-화면 예시는 `docs/prototype-server-tree.png`에 있습니다. 실제 통신은 여전히 미구현입니다.
+전체 역할의 화면 예시는 `docs/prototype-socket-cards.png`, 다중 서버는 `docs/prototype-server-tree.png`에 있습니다. 실제 통신은 여전히 미구현입니다.
 
 ## 다음 단계
 

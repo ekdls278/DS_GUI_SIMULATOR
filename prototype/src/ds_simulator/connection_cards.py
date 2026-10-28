@@ -1,10 +1,14 @@
 """Connection cards with an explicit listener → accepted-client hierarchy."""
 from PySide6.QtCore import Qt, QSize, Signal
 from PySide6.QtGui import QColor, QFont, QPalette, QPen
-from PySide6.QtWidgets import QAbstractItemView, QFrame, QPushButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout
+from PySide6.QtWidgets import QAbstractItemView, QFrame, QPushButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QHBoxLayout, QLabel
 
 ROLE = Qt.ItemDataRole.UserRole
-SERVER_COLORS = ('#3264e8', '#8058bf', '#198b81', '#bd7430')
+ROLE_STYLES = {
+    'TCP Client': ('TCP 클라이언트', '#3264e8', '#edf2ff'),
+    'TCP Server': ('TCP 서버', '#8058bf', '#f2edfa'),
+    'UDP': ('UDP', '#198b81', '#e6f6f2'),
+}
 
 
 class PeerTree(QTreeWidget):
@@ -24,11 +28,10 @@ class PeerTree(QTreeWidget):
 class ConnectionCard(QFrame):
     peer_selected = Signal(str, str)
 
-    def __init__(self, connection, accent='#3264e8', parent=None):
+    def __init__(self, connection, parent=None):
         super().__init__(parent)
         self.connection_id = connection.identifier
         self.is_server = connection.mode == 'TCP Server'
-        self.accent = accent
         self.signature = None
         self.setObjectName('serverConnectionCard' if self.is_server else 'connectionCard')
         body = QVBoxLayout(self)
@@ -38,12 +41,35 @@ class ConnectionCard(QFrame):
         self.header.setObjectName('connectionHeader')
         self.header.setCheckable(True)
         self.header.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.header.setMinimumHeight(88)
+        self.header.setMinimumHeight(128)
         self.header.setStyleSheet('''
             QPushButton#connectionHeader { text-align: left; border: 0; background: transparent; padding: 8px; font-size: 11px; }
             QPushButton#connectionHeader:hover { background: #edf3ff; }
             QPushButton#connectionHeader:checked { color: #285ac6; }
         ''')
+        header_layout = QVBoxLayout(self.header)
+        header_layout.setContentsMargins(10, 8, 10, 8)
+        header_layout.setSpacing(7)
+        badges = QHBoxLayout()
+        badges.setSpacing(6)
+        self.role_badge = self.make_label('')
+        role, color, background = ROLE_STYLES[connection.mode]
+        self.role_badge.setText(role)
+        self.role_badge.setStyleSheet(f'color: {color}; background: {background}; padding: 3px 7px; border-radius: 4px; font-size: 10px; font-weight: 600;')
+        badges.addWidget(self.role_badge)
+        badges.addStretch()
+        self.selected_badge = self.make_label('선택됨')
+        self.selected_badge.setStyleSheet('color: #3264e8; font-size: 10px; font-weight: 600;')
+        badges.addWidget(self.selected_badge)
+        self.status_badge = self.make_label('')
+        badges.addWidget(self.status_badge)
+        header_layout.addLayout(badges)
+        self.title_label = self.make_label(connection.title)
+        self.title_label.setWordWrap(True)
+        self.title_label.setStyleSheet('font-size: 12px; font-weight: 600; color: #22354e;')
+        header_layout.addWidget(self.title_label)
+        self.local_label, self.local_value = self.add_endpoint(header_layout, 'Local · 내 PC')
+        self.remote_label, self.remote_value = self.add_endpoint(header_layout, 'Remote · 상대')
         body.addWidget(self.header)
         if self.is_server:
             self.tree = PeerTree()
@@ -68,23 +94,53 @@ class ConnectionCard(QFrame):
             self.tree.itemExpanded.connect(self.resize_tree)
             body.addWidget(self.tree)
 
+    @staticmethod
+    def make_label(text):
+        label = QLabel(text)
+        label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        return label
+
+    def add_endpoint(self, layout, caption):
+        line = QHBoxLayout()
+        line.setSpacing(6)
+        title = self.make_label(caption)
+        title.setFixedWidth(82)
+        title.setStyleSheet('font-size: 10px; color: #7b8799;')
+        value = self.make_label('')
+        value.setWordWrap(True)
+        value.setStyleSheet('font-size: 11px; color: #41546e;')
+        line.addWidget(title)
+        line.addWidget(value, 1)
+        layout.addLayout(line)
+        return title, value
+
     def update_snapshot(self, connection, sockets, peers, selected_id, active):
-        color = self.accent if self.is_server else ('#9bb9f9' if active else '#e1e6ef')
-        background = '#f4f7ff' if active else '#ffffff'
-        self.setStyleSheet(f'QFrame#{self.objectName()} {{ border: {3 if self.is_server else 1}px solid {color}; border-radius: 9px; background: {background}; }}')
+        # Role, state and selection have separate visual meanings on every card.
+        color = '#3264e8' if active else '#dfe5ee'
+        background = '#f3f7ff' if active else '#ffffff'
+        self.setStyleSheet(f'QFrame#{self.objectName()} {{ border: 2px solid {color}; border-radius: 9px; background: {background}; }}')
+        self.selected_badge.setVisible(active)
         local = sockets[0].local_endpoint if sockets else connection.local_endpoint
         if self.is_server:
             listener = next((s for s in sockets if s.role == 'Listen'), None)
             local = listener.local_endpoint if listener else connection.local_endpoint
-            state = 'LISTENING · 접속 대기 중' if listener else '서버 중지 · 대기 시작 필요'
-            self.header.setText(f'TCP SERVER  ·  {connection.identifier}\n{connection.name}\nLocal  {local}\n{state}')
+            state = (f'대기중 · 접속 {len(peers)}' if peers else '대기중') if listener else '중지됨'
+            state_color, state_background = ('#3264e8', '#eaf1ff') if listener else ('#7b8799', '#eef1f5')
+            remote = '아래 클라이언트에서 선택'
+            self.remote_label.setText('Remote · 상대')
             self.header.setToolTip(f'{connection.title}\n서버 수신 주소: {local}\n0.0.0.0은 내 PC의 모든 인터페이스를 뜻합니다.\n송신하려면 아래 접속 클라이언트를 선택하세요. (모의 상태)')
             self.update_peers(peers, selected_id if active else None)
         else:
-            mode = 'TCP CLIENT' if connection.mode == 'TCP Client' else 'UDP'
-            state = ('연결됨' if connection.mode == 'TCP Client' else '바인딩됨') if sockets else '미연결'
-            self.header.setText(f'{mode}  ·  {connection.title}\nLocal  {local}\n{"송신 대상" if connection.mode == "UDP" else "Remote"}  {connection.remote_endpoint}\n{state} · 모의')
-            self.header.setToolTip(f'{connection.mode} · {state}\nLocal {local}\nRemote {connection.remote_endpoint}\n주소와 상태는 예시입니다.')
+            state = ('연결됨' if connection.mode == 'TCP Client' else '수신 대기') if sockets else '미연결'
+            state_color, state_background = ('#17845c', '#e9f7ef') if sockets else ('#7b8799', '#eef1f5')
+            remote = connection.remote_endpoint
+            self.remote_label.setText('Target · 송신' if connection.mode == 'UDP' else 'Remote · 상대')
+            self.header.setToolTip(f'{connection.mode} · {state}\nLocal {local}\nRemote {remote}\n주소와 상태는 예시입니다.')
+        self.local_value.setText(local)
+        self.remote_value.setText(remote)
+        self.status_badge.setText(f'● {state}')
+        self.status_badge.setStyleSheet(f'font-size: 10px; color: {state_color}; background: {state_background}; padding: 3px 6px; border-radius: 4px;')
+        self.header.setAccessibleName(f'{connection.mode} · {connection.title} · {state} · Local {local} · Remote {remote}')
 
     def update_peers(self, peers, selected_id):
         signature = tuple((p.identifier, p.remote_endpoint, p.local_endpoint) for p in peers)
@@ -110,6 +166,11 @@ class ConnectionCard(QFrame):
                 self.root.setExpanded(expanded)
                 self.signature = signature
             selected = next((self.root.child(i) for i in range(self.root.childCount()) if self.root.child(i).data(0, ROLE) == selected_id), None)
+            for index in range(self.root.childCount()):
+                item = self.root.child(index)
+                peer = peers[index]
+                suffix = ' · 송신 대상' if peer.identifier == selected_id else ''
+                item.setText(0, f'{peer.remote_endpoint}\n{peer.identifier} · 연결됨{suffix}')
             self.tree.clearSelection()
             self.tree.setCurrentItem(selected)
             if selected is not None:

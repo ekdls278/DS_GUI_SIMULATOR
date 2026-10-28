@@ -130,7 +130,7 @@ class GuiTests(unittest.TestCase):
         self.window.select_connection(2)
         card = self.window.connection_cards['SRV-01']
         self.assertTrue(card.is_server)
-        self.assertIn('0.0.0.0:7000', card.header.text())
+        self.assertIn('0.0.0.0:7000', card.local_value.text())
         self.assertEqual(card.root.childCount(), 2)
         self.assertIn('192.168.0.21:51001', card.root.child(0).text(0))
         self.assertIn('192.168.0.22:51002', card.root.child(1).text(0))
@@ -148,12 +148,10 @@ class GuiTests(unittest.TestCase):
         self.assertIsNone(self.window.current_socket())
         self.assertEqual(card.tree.selectedItems(), [])
 
-    def test_multiple_servers_have_separate_children_and_borders(self):
+    def test_multiple_servers_have_separate_children(self):
         self.window.add_connection_preview(ConnectionPreview('SRV-02', '두 번째 서버', 'TCP Server', '127.0.0.1:7100'))
         second = self.window.connection_cards['SRV-02']
         first = self.window.connection_cards['SRV-01']
-        self.assertNotEqual(first.accent, second.accent)
-        self.assertIn('3px solid', second.styleSheet())
         self.assertEqual(second.root.childCount(), 0)
         self.window.toggle_preview_connection()
         self.window.accept_preview_peer()
@@ -172,10 +170,10 @@ class GuiTests(unittest.TestCase):
         self.window.message_catalog.setCurrentRow(0)
         self.window.toggle_preview_connection()
         self.assertEqual(card.root.childCount(), 0)
-        self.assertIn('서버 중지', card.header.text())
+        self.assertIn('중지됨', card.status_badge.text())
         self.assertFalse(self.window.send_button.isEnabled())
         self.window.toggle_preview_connection()
-        self.assertIn('LISTENING', card.header.text())
+        self.assertIn('대기중', card.status_badge.text())
         self.assertIsNone(self.window.current_socket())
         self.window.accept_preview_peer()
         self.assertEqual(card.root.childCount(), 1)
