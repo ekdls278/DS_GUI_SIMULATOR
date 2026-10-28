@@ -4,10 +4,10 @@ Windows용 장비 시험 소프트웨어의 **조작 가능한 데스크톱 프�
 Python + PySide6로 만들었습니다. 기존 GUI 시안을 이어서 시나리오 편집, 모의 실행,
 파일 저장과 공통 로그를 구현했습니다. 실제 네트워크 소켓을 열거나 장비를 제어하지 않습니다.
 
-**[Windows 실행 파일 바로 다운로드 — ZIP](https://github.com/ekdls278/DS_GUI_SIMULATOR/releases/download/prototype-windows-40655566229-1/DS-Simulator-Windows-x64.zip)** · [릴리즈 상세](https://github.com/ekdls278/DS_GUI_SIMULATOR/releases/tag/prototype-windows-40655566229-1)
+**[Windows 단일 실행 파일 다운로드 — EXE](https://github.com/ekdls278/DS_GUI_SIMULATOR/releases/download/prototype-windows-40657336790-1/DS-Simulator.exe)** · [릴리즈 상세](https://github.com/ekdls278/DS_GUI_SIMULATOR/releases/tag/prototype-windows-40657336790-1)
 
-ZIP 전체를 압축 해제한 뒤 **`DS-Simulator/DS-Simulator.exe`**를 더블클릭하세요.
-Python·VS Code·CMD 파일은 필요하지 않습니다. EXE와 `_internal` 폴더를 함께 유지하세요.
+**`DS-Simulator.exe` 파일 하나만 다운로드하여 더블클릭하세요.**
+압축 해제, Python·VS Code 설치, CMD 파일, 추가 라이브러리 폴더가 필요하지 않습니다.
 실행 파일 배포본은 GitHub Releases에서 관리하며 이 폴더에는 개발 소스를 보관합니다.
 
 ![시나리오 편집기](docs/prototype-scenario.png)
@@ -17,14 +17,13 @@ Python·VS Code·CMD 파일은 필요하지 않습니다. EXE와 `_internal` 폴
 ## Windows 실행 파일 (Python 설치 불필요)
 
 [GitHub Releases](https://github.com/ekdls278/DS_GUI_SIMULATOR/releases)에서
-`DS-Simulator-Windows-x64.zip`을 받아 전체를 압축 해제하고
-`DS-Simulator/DS-Simulator.exe`를 실행하세요. EXE와 `_internal` 폴더를 함께 유지하세요.
+`DS-Simulator.exe` 파일 하나를 받아 실행하세요. 필요한 런타임은 EXE에 내장되어 있습니다.
 배포 파일은 Windows x64에서 테스트와 패키징된 프로그램의 화면 실행 검사를 통과하면 게시됩니다.
 모의 프로토타입의 기능과 제한은 소스 실행 버전과 같습니다.
 
 Windows 빌드 워크플로는 [Actions](https://github.com/ekdls278/DS_GUI_SIMULATOR/actions/workflows/windows-executable.yml)에서
 진행 상황을 확인하거나 `Run workflow`로 다시 실행할 수 있습니다.
-ZIP에 포함된 `build-info.json`에 빌드 커밋과 화면 실행 검사 결과가 들어 있습니다.
+빌드 커밋과 단독 실행 검사 결과는 Actions 결과물의 `validation/build-info.json`에서 확인합니다.
 
 ## Windows 소스 실행
 
@@ -49,7 +48,7 @@ uv run ds-simulator
 
 대화형 Windows 사용과 실제 장비 검증은 별도로 필요합니다.
 Linux에서는 Python 3.12 / Qt offscreen으로 확인했고, Windows CI의 빌드별 검증 결과는
-배포 ZIP의 `build-info.json`과 Actions에서 확인합니다.
+Actions 결과물의 `validation/build-info.json`에서 확인합니다.
 
 ## 첫 사용 순서
 
@@ -155,6 +154,6 @@ py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe packaging/build_windows.py
 ```
 
-결과는 `dist/DS-Simulator-Windows-x64.zip`이며 SHA-256 파일도 함께 생성됩니다.
-빌드 스크립트는 EXE를 소스 폴더 밖에서 실행해 송수신·시나리오 화면의 PNG 생성을 검사합니다.
+결과는 `dist/DS-Simulator.exe` 단일 파일이며 SHA-256 파일도 함께 생성됩니다.
+빌드 스크립트는 EXE 하나만 새 임시 폴더에 복사해 송수신·시나리오 화면의 PNG 생성을 검사합니다.
 Linux에서 이 스크립트를 실행하면 Windows 빌드가 필요하다는 안내와 함께 중단합니다.
