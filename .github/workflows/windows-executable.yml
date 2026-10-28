@@ -29,14 +29,15 @@ jobs:
             prototype/pyproject.toml
             prototype/packaging/requirements-build.txt
       - name: Install runtime and packaging tools
-        run: python -m pip install -e . -r packaging/requirements-build.txt
+        run: python packaging/ci_check.py install -m pip install -e . -r packaging/requirements-build.txt
       - name: Run tests on Windows
         env:
           QT_QPA_PLATFORM: offscreen
-        run: python -m unittest discover -s tests -v
+        run: python packaging/ci_check.py tests -m unittest discover -s tests -v
       - name: Package and smoke-test the Windows executable
-        run: python packaging/build_windows.py
+        run: python packaging/ci_check.py package packaging/build_windows.py
       - name: Retain executable and validation evidence
+        if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: DS-Simulator-Windows-x64
