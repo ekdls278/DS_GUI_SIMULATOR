@@ -1,0 +1,75 @@
+{
+  "format": "ds-scenario",
+  "version": 1,
+  "catalog": "sample-1",
+  "name": "주파수 설정 반복 시험",
+  "steps": [
+    {
+      "kind": "repeat",
+      "id": "0f8efbd97a174a95ad6194df53199641",
+      "message": "SET_FREQUENCY",
+      "connection_id": "TCP-01",
+      "socket_id": "",
+      "headers": {},
+      "values": {},
+      "big_endian": false,
+      "count": 10,
+      "milliseconds": 500,
+      "children": [
+        {
+          "kind": "send",
+          "id": "bf6872d7e1814e7296cba4e5031fb8c7",
+          "message": "SET_FREQUENCY",
+          "connection_id": "TCP-01",
+          "socket_id": "",
+          "headers": {
+            "src": "0xAAAA",
+            "dst": "0xBBBB",
+            "cmd": "0xCCCC"
+          },
+          "values": {
+            "center_frequency": "1,000,000,000",
+            "bandwidth": "20,000,000",
+            "channel": "1"
+          },
+          "big_endian": false,
+          "count": 10,
+          "milliseconds": 500,
+          "children": []
+        },
+        {
+          "kind": "wait",
+          "id": "31bed33a2292468f8747d1db2e7444df",
+          "message": "SET_FREQUENCY",
+          "connection_id": "TCP-01",
+          "socket_id": "",
+          "headers": {},
+          "values": {},
+          "big_endian": false,
+          "count": 10,
+          "milliseconds": 500,
+          "children": []
+        },
+        {
+          "kind": "send",
+          "id": "e304191592b34251adbc1a65e5685b18",
+          "message": "REQUEST_STATUS",
+          "connection_id": "TCP-01",
+          "socket_id": "",
+          "headers": {
+            "src": "0xAAAA",
+            "dst": "0xBBBB",
+            "cmd": "0xCCCD"
+          },
+          "values": {
+            "channel": "1"
+          },
+          "big_endian": false,
+          "count": 10,
+          "milliseconds": 500,
+          "children": []
+        }
+      ]
+    }
+  ]
+}

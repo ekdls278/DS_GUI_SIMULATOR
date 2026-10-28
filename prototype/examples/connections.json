@@ -1,0 +1,34 @@
+{
+  "format": "ds-connections",
+  "version": 1,
+  "connections": [
+    {
+      "identifier": "TCP-01",
+      "name": "수신기 A",
+      "mode": "TCP Client",
+      "local_endpoint": "0.0.0.0:0",
+      "remote_endpoint": "192.168.0.10:5000"
+    },
+    {
+      "identifier": "TCP-02",
+      "name": "수신기 B",
+      "mode": "TCP Client",
+      "local_endpoint": "0.0.0.0:0",
+      "remote_endpoint": "192.168.0.11:5000"
+    },
+    {
+      "identifier": "SRV-01",
+      "name": "외부 장치 접속",
+      "mode": "TCP Server",
+      "local_endpoint": "0.0.0.0:7000",
+      "remote_endpoint": ""
+    },
+    {
+      "identifier": "UDP-01",
+      "name": "스펙트럼 수신",
+      "mode": "UDP",
+      "local_endpoint": "0.0.0.0:6000",
+      "remote_endpoint": "192.168.0.10:6001"
+    }
+  ]
+}
