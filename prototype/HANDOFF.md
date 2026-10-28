@@ -22,9 +22,9 @@
 ## Windows 패키징
 
 `.github/workflows/windows-executable.yml`은 Windows x64에서 22개 테스트를 실행하고
-`packaging/build_windows.py`로 PyInstaller onedir EXE를 만듭니다. Frozen EXE를 임시 폴더에서
-실행하여 workspace/scenario PNG 생성을 확인한 뒤 ZIP·SHA-256을 GitHub prerelease에 올립니다.
-Python 설치 없이 사용할 수 있지만 EXE와 `_internal` 폴더를 함께 유지해야 합니다.
+`packaging/build_windows.py`로 PyInstaller onefile EXE를 만듭니다. EXE 파일 하나만 새 임시 폴더에 복사하여
+workspace/scenario PNG 생성을 확인한 뒤 EXE·SHA-256을 GitHub prerelease에 올립니다.
+Python 설치, 압축 해제, 추가 폴더 없이 EXE 하나로 실행합니다.
 실제 장비와 Windows 대화형 GUI의 모든 조작을 검증하는 과정은 별도로 필요합니다.
 
 ## 다음 단계

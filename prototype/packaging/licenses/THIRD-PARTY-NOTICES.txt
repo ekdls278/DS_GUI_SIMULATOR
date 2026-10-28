@@ -6,7 +6,9 @@ https://www.python.org/downloads/source/
 
 PySide6-Essentials, shiboken6, and Qt 6.8.3: used under the LGPLv3 terms.
 The LGPLv3 and incorporated GPLv3 texts are included in this directory.
-Qt libraries remain dynamically linked, replaceable files in _internal.
+Qt libraries are dynamically loaded from the onefile extraction directory.
+The application source and build instructions are available in the repository
+so the application can be rebuilt with replacement LGPL components.
 No changes to these dependencies were made for this prototype.
 Corresponding upstream source:
 https://github.com/pyside/pyside-setup/tree/v6.8.3
