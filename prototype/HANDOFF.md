@@ -15,15 +15,15 @@
 - `activity.py`는 실제 입력값을 담은 MOCK 로그와 필터·상세·JSON/CSV 내보내기를 담당합니다.
   모의 수신은 명시적인 예시 버튼으로만 만듭니다. 자동 장비 응답이나 합격 판정은 없습니다.
 - `profiles.py`는 연결 설정 저장/복원입니다. 연결 상태를 복원하지 않습니다.
-- 시나리오 JSON은 sample-1 예시 ICD와 버전 1을 사용합니다. 실제 ICD 호환 형식이 아닙니다.
+- 시나리오 JSON은 기본 예시 version 1과 가져온 ICD 정의를 포함한 version 2를 지원합니다. 실제 wire 규격은 아직 미정입니다.
 - 시나리오에서 TCP 서버는 Accepted 소켓 ID를 지정합니다. 재시작 후 재선택이 필요합니다.
 - `examples/`의 시나리오와 연결 설정은 기본값을 복원하는 데 사용할 수 있습니다.
 
 ## Windows 패키징
 
-`.github/workflows/windows-executable.yml`은 Windows x64에서 40개 테스트를 실행하고
+`.github/workflows/windows-executable.yml`은 Windows x64에서 55개 테스트를 실행하고
 `packaging/build_windows.py`로 PyInstaller onefile EXE를 만듭니다. EXE 파일 하나만 새 임시 폴더에 복사하여
-workspace/scenario/logs/spectrum PNG 생성을 확인한 뒤 EXE·SHA-256을 GitHub prerelease에 올립니다.
+workspace/scenario/logs/spectrum/excel-import PNG 생성을 확인한 뒤 EXE·SHA-256을 GitHub prerelease에 올립니다.
 Python 설치, 압축 해제, 추가 폴더 없이 EXE 하나로 실행합니다.
 실제 장비와 Windows 대화형 GUI의 모든 조작을 검증하는 과정은 별도로 필요합니다.
 
@@ -54,11 +54,28 @@ Python 설치, 압축 해제, 추가 폴더 없이 EXE 하나로 실행합니다
 전용 로그는 새 기록이 들어와도 선택된 상세를 유지하고, 선택한 기록이 버퍼에서 제거되면 해제합니다.
 새 화면은 docs/prototype-traffic-monitor.png, prototype-logs.png, prototype-spectrum-popup.png에 있습니다.
 
+## Excel ICD 가져오기
+
+`icd.py`는 openpyxl read-only로 선택한 `(데이터)` 워크시트의 2행부터 A~E열만 읽습니다.
+A=opcode, B=연동자료명, C=순번, D=데이터 요소, E=공백 구분 선택값입니다.
+같은 메시지의 빈 A/B와 병합 셀을 이어 읽고, 새 opcode의 이름이 없으면 잘못 이어 붙이지 않고 행 번호를 안내합니다.
+데이터 타입·바이트 길이·선택값의 숫자 의미를 추정하지 않습니다. E가 비면 자유 텍스트입니다.
+수식은 실행하지 않습니다. 실제 회사 데이터가 아닌 `examples/example-icd.xlsx`만 테스트/배포에 사용합니다.
+
+활성 ICD는 `window.messages`에만 보관하며 전역 MESSAGES를 수정하지 않습니다.
+`IcdMixin.apply_catalog()`는 수동 목록과 정의 화면을 교체하고 기본적으로 시나리오를 새 시험으로 만듭니다.
+사용자 파일 선택·시트 선택 취소와 파싱 실패는 기존 상태를 유지합니다. 실행 중인 시나리오가 있으면 가져오기를 막습니다.
+수동/시나리오 모두 `icd_widgets.py`의 입력을 사용합니다. 가져온 메시지는 SRC/DST를 임의로 채우지 않고 opcode만 정의로 사용합니다.
+도메인 함수와 MockTransport는 카탈로그를 주입받습니다. 로그에는 연동자료명과 이름이 있는 data_elements도 기록합니다.
+시나리오 version 2는 가져온 ICD 정의와 fingerprint를 포함합니다. version 1 기본 예시와 호환됩니다.
+JSON 로드 시 카탈로그도 복원하며 트리 재구성 중 선택 신호를 막아 이전 ICD 콜백이 남지 않도록 합니다.
+원본 파일을 복사하거나 네트워크로 올리지 않습니다. 사용자가 선택한 시나리오 저장에는 ICD 내용이 포함되며 기존 2MB 제한이 있습니다.
+
 ## 다음 단계
 
 1. Windows에서 화면 크기, 드래그 이동, 네이티브 파일 대화상자를 수동 검토합니다.
-2. 실제 Excel/JSON과 패킷 예시로 필드 길이·타입·순서·엔디언·프레이밍을 확정합니다.
-3. 공통 ICD 모델과 Excel 변환, 실제 전송 계층을 추가합니다.
+2. 사용자가 공유 가능한 메타데이터로 필드 길이·타입·순서·엔디언·프레이밍을 확정합니다. 실제 회사 Excel을 요청하거나 저장소에 포함하지 마세요.
+3. 현재 A~E열 가져오기 모델을 확장하고 실제 전송 계층을 추가합니다.
 4. 모의 상대와 실제 TCP/UDP를 검증한 뒤 시나리오에 응답 대기·판정을 추가합니다.
 5. 실제 스펙트럼 형식과 계측기 명령을 받은 뒤 해당 기능을 구현합니다.
 
@@ -76,7 +93,7 @@ UDP IPv4 단일 페이로드 최대 65,507바이트이므로 64KiB 메시지는 
 고속 수신은 수신/해석/저장/화면 갱신 분리 및 실제 Windows 부하 시험이 필요합니다.
 
 검증: `QT_QPA_PLATFORM=offscreen uv run python -m unittest discover -s tests -v`
-40개 테스트가 있으며 Linux Qt offscreen에서 통과했습니다.
+55개 테스트가 있으며 Linux Qt offscreen에서 통과했습니다.
 현재 UI 캡처: `docs/prototype-workspace.png`, `docs/prototype-scenario.png`.
 Windows 대화형 수동 조작·실장비·10G·FFT·계측기 검증은 아직 수행하지 않았습니다.
 Windows CI에서 전체 테스트와 frozen EXE의 offscreen 실행을 검사합니다.

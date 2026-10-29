@@ -22,3 +22,11 @@ bundled applications under their own terms. Included distribution license
 files, when supplied, are copied into the PyInstaller subdirectory.
 https://pyinstaller.org/en/stable/license.html
 https://github.com/pyinstaller/pyinstaller
+
+openpyxl 3.1.5 and et-xmlfile: MIT License.
+https://openpyxl.readthedocs.io/
+https://foss.heptapod.net/openpyxl/et_xmlfile
+defusedxml 0.7.1: Python Software Foundation License.
+https://github.com/tiran/defusedxml
+License files supplied by these distributions are included in their respective
+subdirectories in the bundled resources.

@@ -11,8 +11,10 @@ from PySide6.QtWidgets import (
     QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
-from .domain import Scenario, Step, default_headers, default_values, load_scenario, save_json
+from .domain import Scenario, Step, load_scenario, save_json
 from .preview_data import MESSAGES
+from .icd import IcdMessage
+from .icd_widgets import make_field_input, connect_input
 from .runtime import ScenarioRunner
 from .widgets import Card, button, chip, label, row
 
@@ -104,14 +106,11 @@ class ScenarioEditor(QWidget):
         palette.setMinimumWidth(205)
         search = QLineEdit()
         search.setPlaceholderText("블록 검색")
+        self.palette_search = search
         palette.body.addWidget(search)
         self.palette = QListWidget()
         self.palette.setObjectName("messageCatalog")
-        for title, kind, name in [("↻  횟수 반복", "repeat", ""), ("◷  시간 대기", "wait", ""), *[(f"{v.description}\n{k}", "send", k) for k, v in MESSAGES.items()]]:
-            item = QListWidgetItem(title)
-            item.setData(ROLE, (kind, name))
-            self.palette.addItem(item)
-        self.palette.setCurrentRow(2)
+        self.rebuild_palette()
         search.textChanged.connect(self.filter_palette)
         self.palette.itemDoubleClicked.connect(self.add_selected)
         palette.body.addWidget(self.palette, 1)
@@ -174,6 +173,27 @@ class ScenarioEditor(QWidget):
         self.delete_shortcut.activated.connect(self.delete_selected)
         self.populate()
 
+    def rebuild_palette(self):
+        self.palette.clear()
+        items = [("↻  횟수 반복", "repeat", ""), ("◷  시간 대기", "wait", "")]
+        items.extend((f"{message.cmd}\n{message.description}", "send", key) for key, message in self.window.messages.items())
+        for title, kind, key in items:
+            item = QListWidgetItem(title)
+            item.setData(ROLE, (kind, key))
+            self.palette.addItem(item)
+        self.palette.setCurrentRow(2 if len(items) > 2 else 0)
+        self.filter_palette(self.palette_search.text())
+
+    def reset_for_catalog(self):
+        self.document = Scenario("새 시험", catalog=self.window.scenario_catalog())
+        self.path = None
+        self.palette_search.clear()
+        self.rebuild_palette()
+        self.populate()
+        self.dirty = False
+        self.file_label.setText("저장하지 않은 시험")
+        self.status.setText("가져온 ICD로 새 시험을 구성하세요. 연결 및 블록의 값을 확인한 뒤 모의 실행합니다.")
+
     def mark_dirty(self, *args):
         if self.loading:
             return
@@ -190,8 +210,8 @@ class ScenarioEditor(QWidget):
             return f"↻  {step.count}회 반복\n내부 활동을 순서대로 반복"
         if step.kind == "wait":
             return f"◷  시간 대기\n{step.milliseconds:,} ms"
-        message = MESSAGES[step.message]
-        return f"ICD 메시지 송신 · {message.description}\n{step.message}  |  {step.connection_id}"
+        message = self.window.messages[step.message]
+        return f"ICD 메시지 송신 · {message.description}\nopcode {message.cmd}  |  {step.connection_id}"
 
     def make_item(self, step, parent):
         item = QTreeWidgetItem(parent, [self.describe(step)])
@@ -207,15 +227,18 @@ class ScenarioEditor(QWidget):
 
     def populate(self):
         self.loading = True
-        self.tree.clear()
-        for step in self.document.steps:
-            self.make_item(step, self.tree)
-        self.name_input.setText(self.document.name)
-        self.loading = False
-        if self.tree.topLevelItemCount():
-            self.tree.setCurrentItem(self.tree.topLevelItem(0))
-        else:
-            self.show_properties()
+        blocked = self.tree.blockSignals(True)
+        try:
+            self.tree.clear()
+            for step in self.document.steps:
+                self.make_item(step, self.tree)
+            self.name_input.setText(self.document.name)
+            if self.tree.topLevelItemCount():
+                self.tree.setCurrentItem(self.tree.topLevelItem(0))
+        finally:
+            self.tree.blockSignals(blocked)
+            self.loading = False
+        self.show_properties()
 
     def collect(self):
         def children(parent):
@@ -228,6 +251,7 @@ class ScenarioEditor(QWidget):
             return result
         self.document.name = self.name_input.text().strip()
         self.document.steps = children(self.tree.invisibleRootItem())
+        self.document.catalog = self.window.scenario_catalog()
         return self.document
 
     def add_selected(self, *args):
@@ -237,7 +261,7 @@ class ScenarioEditor(QWidget):
         if not item or item.isHidden():
             return
         kind, name = item.data(ROLE)
-        step = Step.send(name) if kind == "send" else Step(kind)
+        step = Step.send(name, self.window.messages) if kind == "send" else Step(kind)
         if kind == "send":
             connection = self.window.selected_connection()
             step.connection_id = connection.identifier
@@ -314,6 +338,8 @@ class ScenarioEditor(QWidget):
         self.mark_dirty()
 
     def show_properties(self):
+        if self.loading:
+            return
         while self.form.rowCount():
             self.form.removeRow(0)
         item = self.tree.currentItem()
@@ -331,8 +357,9 @@ class ScenarioEditor(QWidget):
             spin.valueChanged.connect(lambda value: self.set_property(step, key, value))
             self.form.addRow("반복 횟수" if step.kind == "repeat" else "대기 시간", spin)
             return
-        self.form.addRow(label(step.message, "heading"))
-        self.form.addRow(label(MESSAGES[step.message].description, "muted"))
+        message = self.window.messages[step.message]
+        self.form.addRow(label(message.description, "heading"))
+        self.form.addRow(label(f"opcode {message.cmd}", "muted"))
         target = QComboBox()
         target.setMinimumContentsLength(12)
         target.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
@@ -362,14 +389,15 @@ class ScenarioEditor(QWidget):
             endpoint = label("미연결 / 대상 미선택\nICD 송수신 화면에서 모의 연결하세요.", "caption")
         endpoint.setWordWrap(True)
         self.form.addRow(endpoint)
-        for key in ("src", "dst", "cmd"):
-            edit = QLineEdit(step.headers[key])
-            edit.textEdited.connect(lambda value, k=key: (step.headers.__setitem__(k, value), self.mark_dirty()))
-            self.form.addRow(key.upper(), edit)
-        for key, data_type, _, unit, description in MESSAGES[step.message].fields:
-            edit = QLineEdit(step.values[key])
+        if not isinstance(message, IcdMessage):
+            for key in ("src", "dst", "cmd"):
+                edit = QLineEdit(step.headers[key])
+                edit.textEdited.connect(lambda value, k=key: (step.headers.__setitem__(k, value), self.mark_dirty()))
+                self.form.addRow(key.upper(), edit)
+        for key, data_type, _, unit, description in message.fields:
+            edit = make_field_input(message, key, step.values[key])
             edit.setToolTip(f"{data_type} · {unit}")
-            edit.textEdited.connect(lambda value, k=key: (step.values.__setitem__(k, value), self.mark_dirty()))
+            connect_input(edit, lambda value, k=key: (step.values.__setitem__(k, value), self.mark_dirty()), user_only=True)
             self.form.addRow(f"{description}\n{unit}" if unit != "—" else description, edit)
         endian = QCheckBox("빅엔디안 (설정 기록용)")
         endian.setChecked(step.big_endian)
@@ -387,7 +415,7 @@ class ScenarioEditor(QWidget):
     def new_document(self):
         if self.runner.running or not self.confirm_discard():
             return
-        self.document, self.path = Scenario("새 시험"), None
+        self.document, self.path = Scenario("새 시험", catalog=self.window.scenario_catalog()), None
         self.populate()
         self.dirty = False
         self.file_label.setText("저장하지 않은 시험")
@@ -400,7 +428,10 @@ class ScenarioEditor(QWidget):
 
     def load_from(self, path):
         document = load_scenario(path)
+        self.window.apply_catalog(document.catalog if document.catalog is not None else MESSAGES, "시나리오 내장 ICD" if document.catalog is not None else "기본 예시 ICD", reset_scenario=False)
         self.document, self.path = document, Path(path)
+        self.palette_search.clear()
+        self.rebuild_palette()
         self.populate()
         self.dirty = False
         self.file_label.setText(str(self.path))

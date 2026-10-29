@@ -8,8 +8,10 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QWidget,
 )
 
-from .preview_data import MESSAGES, SocketPreview
+from .preview_data import SocketPreview
 from .domain import Step, validate_message
+from .icd import IcdMessage
+from .icd_widgets import make_field_input, input_value, connect_input
 from .connection_cards import ConnectionCard
 from .theme import BLUE
 from .widgets import Card, button, chip, label, row
@@ -143,28 +145,43 @@ class WorkspaceMixin:
         self.select_connection(index)
 
     def make_message_catalog(self):
-        card = Card("ICD 선택", "05")
+        card = Card("ICD 선택")
         card.setMinimumWidth(265)
-        card.body.addWidget(label("Receiver_ICD_v0.1.xlsx", "caption"))
+        self.catalog_count = chip(f"{len(self.messages):02}", "neutralChip")
+        card.body.itemAt(0).layout().addWidget(self.catalog_count)
+        self.catalog_source_label = label(self.catalog_source, "caption")
+        self.catalog_source_label.setWordWrap(True)
+        card.body.addWidget(self.catalog_source_label)
+        load = button("엑셀 가져오기", icon_name="plus")
+        load.clicked.connect(self.import_excel_dialog)
+        card.body.addWidget(load)
         self.message_search = QLineEdit()
-        self.message_search.setPlaceholderText("메시지 이름 또는 CMD 검색")
+        self.message_search.setPlaceholderText("opcode 또는 연동자료명 검색")
         card.body.addWidget(self.message_search)
         self.message_catalog = QListWidget()
         self.message_catalog.setObjectName("messageCatalog")
-        for name, message in MESSAGES.items():
-            item = QListWidgetItem(f"{name}\n{message.cmd}  ·  {message.description}")
-            item.setData(Qt.ItemDataRole.UserRole, name)
-            item.setToolTip(f"{name}\n{message.description}\nSRC {message.src} · DST {message.dst} · CMD {message.cmd}")
-            self.message_catalog.addItem(item)
         self.message_catalog.setMinimumHeight(260)
         self.message_catalog.currentItemChanged.connect(self.select_send_message)
         self.message_search.textChanged.connect(self.filter_messages)
         card.body.addWidget(self.message_catalog, 1)
-        self.catalog_hint = label("소켓 연결 후 ICD를 선택하세요.", "muted")
+        self.catalog_hint = label("ICD 메시지를 선택해 데이터 요소를 확인하세요.", "muted")
         self.catalog_hint.setWordWrap(True)
         card.body.addWidget(self.catalog_hint)
-        card.body.addWidget(label("메시지 정의와 필드 값은 예시입니다.", "caption"))
+        self.refresh_message_catalog()
         return card
+
+    def refresh_message_catalog(self):
+        self.message_catalog.blockSignals(True)
+        self.message_catalog.clear()
+        for key, message in self.messages.items():
+            item = QListWidgetItem(f"{message.cmd}\n{message.description}")
+            item.setData(Qt.ItemDataRole.UserRole, key)
+            item.setToolTip(f"opcode {message.cmd}\n{message.description}")
+            self.message_catalog.addItem(item)
+        self.message_catalog.blockSignals(False)
+        self.catalog_count.setText(f"{len(self.messages):02}")
+        self.catalog_source_label.setText(self.catalog_source)
+        self.message_search.clear()
 
     def filter_messages(self, text):
         term = text.casefold()
@@ -212,8 +229,12 @@ class WorkspaceMixin:
             self.header_inputs[name] = edit
             field.addWidget(edit)
             headers.addLayout(field, 1)
-        editor_layout.addLayout(headers)
-        editor_layout.addWidget(label("DST는 ICD 식별자입니다. 송신 소켓은 왼쪽에서 선택합니다.", "caption"))
+        self.header_editor = QWidget()
+        self.header_editor.setLayout(headers)
+        editor_layout.addWidget(self.header_editor)
+        self.header_note = label("DST는 ICD 식별자입니다. 송신 소켓은 왼쪽에서 선택합니다.", "caption")
+        self.header_note.setWordWrap(True)
+        editor_layout.addWidget(self.header_note)
         self.payload_form = QFormLayout()
         self.payload_form.setVerticalSpacing(9)
         editor_layout.addLayout(self.payload_form)
@@ -280,22 +301,25 @@ class WorkspaceMixin:
         self.send_feedback.clear()
 
     def select_send_message(self, item, previous=None):
-        if item is None or self.current_socket() is None:
+        if item is None:
             return
         name = item.data(Qt.ItemDataRole.UserRole)
-        message = MESSAGES[name]
+        message = self.messages[name]
         self.selected_message_name = name
-        self.message_title.setText(name)
-        self.message_description.setText(f"{message.description}  ·  필드 {len(message.fields)}개")
+        self.message_title.setText(message.description)
+        self.message_description.setText(f"opcode {message.cmd}  ·  데이터 요소 {len(message.fields)}개")
+        imported = isinstance(message, IcdMessage)
+        self.header_editor.setVisible(not imported)
+        self.header_note.setText("Excel의 선택값을 그대로 사용합니다. 실제 패킷 형식은 아직 정의하지 않았습니다." if imported else "DST는 ICD 식별자입니다. 송신 소켓은 왼쪽에서 선택합니다.")
         for key, edit in self.header_inputs.items():
             edit.setText(getattr(message, key))
         while self.payload_form.rowCount():
             self.payload_form.removeRow(0)
         self.payload_inputs.clear()
         for key, data_type, value, unit, description in message.fields:
-            edit = QLineEdit(value)
-            edit.textChanged.connect(self.update_send_button)
-            edit.setToolTip(f"{key} · {data_type} · 화면 예시")
+            edit = make_field_input(message, key, value)
+            connect_input(edit, self.update_send_button)
+            edit.setToolTip(f"{description} · {data_type}" if imported else f"{key} · {data_type} · 화면 예시")
             self.payload_inputs[key] = edit
             self.payload_form.addRow(label(description, "muted"), row(edit, label(unit, "caption")) if unit != "—" else edit)
         self.send_feedback.clear()
@@ -323,15 +347,15 @@ class WorkspaceMixin:
         self.connect_button.setText("연결 해제" if sockets else ("서버 대기 시작" if connection.mode == "TCP Server" else "연결"))
         self.accept_demo_button.setVisible(connection.mode == "TCP Server" and bool(sockets))
         ready = current is not None and bool(remote)
-        self.message_catalog.setEnabled(ready)
-        self.message_search.setEnabled(ready)
-        self.editor.setEnabled(ready and self.selected_message_name is not None)
-        self.catalog_hint.setText("송신할 ICD 메시지를 선택하세요." if ready else ("접속 클라이언트를 선택하세요." if sockets else "소켓 연결 후 ICD를 선택하세요."))
+        self.message_catalog.setEnabled(True)
+        self.message_search.setEnabled(True)
+        self.editor.setEnabled(self.selected_message_name is not None)
+        self.catalog_hint.setText("메시지를 선택해 데이터 요소를 편집하세요." if ready else "조회·편집은 가능합니다. 송신하려면 연결과 대상을 선택하세요.")
         valid = ready and self.selected_message_name is not None
         error = ""
         if valid:
             try:
-                validate_message(self.selected_message_name, {k: e.text() for k, e in self.header_inputs.items()}, {k: e.text() for k, e in self.payload_inputs.items()})
+                validate_message(self.selected_message_name, {k: e.text() for k, e in self.header_inputs.items()}, {k: input_value(e) for k, e in self.payload_inputs.items()}, self.messages)
             except ValueError as exc:
                 error = str(exc)
                 valid = False
@@ -348,7 +372,7 @@ class WorkspaceMixin:
         for index, item in enumerate(self.flow_steps):
             color, background = ("#1a9264", "#eaf8f1") if index < stage else ((BLUE, "#e8efff") if index == stage else ("#7b8799", "#f0f3f8"))
             item.setStyleSheet(f"color: {color}; background: {background}; border-radius: 5px; padding: 6px 14px;")
-        self.flow_hint.setText(("연결 후 ICD 선택", "연결됨 · ICD를 선택하세요", "대상과 필드 확인 후 송신")[stage - 1])
+        self.flow_hint.setText(("ICD 조회·편집 가능 · 연결 후 송신", "연결됨 · ICD를 선택하세요", "대상과 필드 확인 후 송신")[stage - 1])
         if not ready and sockets:
             self.flow_hint.setText("서버 대기 중 · 접속 클라이언트를 선택하세요")
 
@@ -359,8 +383,8 @@ class WorkspaceMixin:
 
     def toggle_preview_connection(self):
         connection = self.selected_connection()
-        self.clear_message_selection()
         if self.connection_sockets(connection):
+            self.clear_message_selection()
             self.sockets = [s for s in self.sockets if s.connection_id != connection.identifier]
             self.selected_peers.pop(connection.identifier, None)
         else:
@@ -399,14 +423,14 @@ class WorkspaceMixin:
             return
         current = self.current_socket()
         connection = self.selected_connection()
-        step = Step.send(self.selected_message_name)
+        step = Step.send(self.selected_message_name, self.messages)
         step.connection_id, step.socket_id = connection.identifier, current.identifier
         step.headers = {k: e.text() for k, e in self.header_inputs.items()}
-        step.values = {k: e.text() for k, e in self.payload_inputs.items()}
+        step.values = {k: input_value(e) for k, e in self.payload_inputs.items()}
         step.big_endian = self.big_endian.isChecked()
         try:
             event = self.transport.send(step)
         except ValueError as exc:
             self.send_feedback.setText(str(exc))
             return
-        self.send_feedback.setText(f"MOCK · 송신 기록 완료 · {self.selected_message_name}\n{current.local_endpoint} → {event['peer']}")
+        self.send_feedback.setText(f"MOCK · 송신 기록 완료 · {self.messages[self.selected_message_name].description}\n{current.local_endpoint} → {event['peer']}")

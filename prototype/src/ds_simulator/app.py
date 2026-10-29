@@ -21,6 +21,8 @@ from .scenario_editor import ScenarioEditor
 from .runtime import MockTransport
 from .activity import ActivityMixin
 from .profiles import ProfileMixin
+from .icd_ui import IcdMixin
+from .icd import read_icd_sheet
 
 
 from .preview_data import CONNECTIONS, MESSAGES, SOCKETS, ConnectionPreview
@@ -41,7 +43,7 @@ def divider() -> QFrame:
     return widget
 
 
-class SimulatorWindow(WorkspaceMixin, ActivityMixin, ProfileMixin, QMainWindow):
+class SimulatorWindow(WorkspaceMixin, ActivityMixin, ProfileMixin, IcdMixin, QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("DS Simulator — 화면 프로토타입")
@@ -55,7 +57,9 @@ class SimulatorWindow(WorkspaceMixin, ActivityMixin, ProfileMixin, QMainWindow):
         self.selected_message_name = None
         self.connection_buttons = {}
         self.selected_peers = {}
-        self.transport = MockTransport(lambda: self.connections, lambda: self.sockets, self)
+        self.messages = dict(MESSAGES)
+        self.catalog_source = "기본 예시 ICD"
+        self.transport = MockTransport(lambda: self.connections, lambda: self.sockets, self, catalog=lambda: self.messages)
         self.initialize_activity()
         self.spectrum_window = None
         self.active_page = 0
@@ -147,6 +151,8 @@ class SimulatorWindow(WorkspaceMixin, ActivityMixin, ProfileMixin, QMainWindow):
             layout.addWidget(item)
             if "연결 프로파일" in text:
                 self.sidebar_connections = item
+            if "ICD 메시지" in text:
+                self.sidebar_messages = item
         layout.addStretch()
         note = QFrame()
         note.setObjectName("previewNote")
@@ -437,84 +443,6 @@ class SimulatorWindow(WorkspaceMixin, ActivityMixin, ProfileMixin, QMainWindow):
         card.body.addLayout(metrics)
         return card
 
-    def make_icd_page(self) -> QWidget:
-        page, layout = self.page("ICD 메시지", "엑셀에서 정의한 메시지와 필드 구조를 확인합니다.")
-        profile = Card()
-        profile_row = row(label("Receiver_ICD_v0.1.xlsx", "heading"), chip("예시 프로파일"))
-        profile_row.addStretch()
-        load = button("엑셀 가져오기 · 준비 중", icon_name="plus")
-        load.setEnabled(False)
-        load.setToolTip("실제 Excel ICD 열 구조를 확인한 뒤 구현합니다.")
-        profile_row.addWidget(load)
-        profile.body.addLayout(profile_row)
-        profile.body.addWidget(label("아래 메시지와 필드 정의는 화면 구성을 위한 예시입니다. 실제 ICD는 추후 적용합니다.", "muted"))
-        layout.addWidget(profile)
-        columns = QHBoxLayout()
-        columns.setSpacing(16)
-        catalog = Card("메시지 목록", "05")
-        catalog.setMinimumWidth(300)
-        message_table = table(["CMD (예시)", "메시지"], [[value.cmd, name] for name, value in MESSAGES.items()])
-        message_table.setMinimumHeight(295)
-        message_table.verticalHeader().setDefaultSectionSize(48)
-        catalog.body.addWidget(message_table, 1)
-        catalog.body.addWidget(label("메시지를 선택하면 필드 구성이 표시됩니다.", "caption"))
-        columns.addWidget(catalog, 3)
-        detail = Card()
-        detail_title = label("SET_FREQUENCY", "heading")
-        detail_subtitle = label("SRC 0xAAAA  →  DST 0xBBBB  ·  CMD 0xCCCC", "muted")
-        detail.body.addWidget(detail_title)
-        detail.body.addWidget(detail_subtitle)
-        field_stack = QStackedWidget()
-        for message in MESSAGES.values():
-            fields_table = table(["필드", "자료형", "예시 값", "단위", "설명"], message.field_rows())
-            fields_table.verticalHeader().setDefaultSectionSize(40)
-            field_stack.addWidget(fields_table)
-        detail.body.addWidget(field_stack, 1)
-        detail.body.addWidget(label("SRC / DST / CMD의 필드 폭·순서·바이트 순서는 ICD 확인 후 정합니다.", "caption"))
-        columns.addWidget(detail, 7)
-        layout.addLayout(columns, 3)
-        message_table.selectRow(0)
-        def select_message():
-            index = message_table.currentRow()
-            if index < 0:
-                return
-            name = list(MESSAGES)[index]
-            message = MESSAGES[name]
-            field_stack.setCurrentIndex(index)
-            detail_title.setText(name)
-            detail_subtitle.setText(f"SRC {message.src}  →  DST {message.dst}  ·  CMD {message.cmd}")
-            property_name.setText(name)
-            property_id.setText(message.cmd)
-            raw.setPlainText(header_preview(message))
-        message_table.itemSelectionChanged.connect(select_message)
-        bottom = QHBoxLayout()
-        bottom.setSpacing(16)
-        properties = Card("메시지 속성")
-        properties_form = QFormLayout()
-        properties_form.setVerticalSpacing(15)
-        properties_form.setHorizontalSpacing(20)
-        property_name = label("SET_FREQUENCY")
-        property_id = label("0xCCCC")
-        properties_form.addRow(label("메시지 이름", "muted"), property_name)
-        properties_form.addRow(label("CMD", "muted"), property_id)
-        properties_form.addRow(label("ICD 프로파일", "muted"), label("Receiver_ICD_v0.1.xlsx"))
-        properties.body.addLayout(properties_form)
-        properties.body.addStretch()
-        properties.body.addWidget(label("값 입력과 송신은 ICD 송수신 화면에서 진행합니다.", "caption"))
-        bottom.addWidget(properties, 4)
-        preview = Card("ICD 헤더 미리보기", "필드 값")
-        preview.body.addWidget(label("SRC · DST · CMD", "caption"))
-        def header_preview(message):
-            return f"SRC    {message.src}\nDST    {message.dst}\nCMD    {message.cmd}"
-        raw = QPlainTextEdit(header_preview(MESSAGES["SET_FREQUENCY"]))
-        raw.setReadOnly(True)
-        raw.setStyleSheet("font-family: 'Consolas', 'DejaVu Sans Mono'; font-size: 14px; padding: 14px;")
-        preview.body.addWidget(raw, 1)
-        preview.body.addWidget(label("헤더 값 표시 예시입니다. 실제 전송 바이트는 아직 정의하지 않았습니다.", "caption"))
-        bottom.addWidget(preview, 6)
-        layout.addLayout(bottom, 2)
-        return page
-
     def make_spectrum_page(self) -> QWidget:
         page, layout = self.page("스펙트럼", "수신 신호의 주파수 분포와 피크 정보를 확인합니다.")
         controls = Card()
@@ -645,7 +573,11 @@ def main() -> int:
     parser.add_argument("--screenshot", type=Path, help="선택 화면을 PNG로 저장하고 종료")
     parser.add_argument("--page", choices=PAGE_NAMES, default="workspace")
     parser.add_argument("--preview-stage", choices=("initial", "connected", "ready"), default="initial", help="워크스페이스의 모의 연결/ICD 선택 단계")
+    parser.add_argument("--icd-excel", type=Path, help="로컬 Excel에서 지정한 데이터 시트를 가져옵니다")
+    parser.add_argument("--icd-sheet", help="가져올 (데이터) 시트 이름")
     args = parser.parse_args()
+    if bool(args.icd_excel) != bool(args.icd_sheet):
+        parser.error("--icd-excel과 --icd-sheet를 함께 지정하세요.")
     app = QApplication(sys.argv[:1])
     app.setStyle("Fusion")
     families = QFontDatabase.families()
@@ -653,6 +585,11 @@ def main() -> int:
     app.setFont(QFont(font_family, 10))
     app.setStyleSheet(STYLESHEET)
     window = SimulatorWindow()
+    if args.icd_excel:
+        try:
+            window.apply_catalog(read_icd_sheet(args.icd_excel, args.icd_sheet), f"{args.icd_excel.name} · {args.icd_sheet}")
+        except (OSError, ValueError) as exc:
+            parser.error(str(exc))
     if args.preview_stage != "initial":
         window.toggle_preview_connection()
         if args.preview_stage == "ready":

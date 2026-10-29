@@ -9,6 +9,7 @@ from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QComboBox, QFileDialog, QLineEdit, QMessageBox, QPlainTextEdit, QTableWidgetItem
 
 from .domain import Step, save_json
+from .icd import IcdMessage
 from .traffic import TrafficHistory
 from .traffic_monitor import TrafficMonitor, public_record
 from .widgets import Card, button, chip, label, row, table
@@ -157,13 +158,23 @@ class ActivityMixin:
         if socket is None:
             self.statusBar().showMessage("모의 수신을 생성할 연결과 접속 대상을 먼저 선택하세요.", 5000)
             return
-        step = Step.send("STATUS_RESPONSE")
+        name = "STATUS_RESPONSE" if "STATUS_RESPONSE" in self.messages else self.selected_message_name
+        if name is None:
+            self.statusBar().showMessage("모의 수신에 사용할 ICD 메시지를 먼저 선택하세요.", 5000)
+            return
+        step = Step.send(name, self.messages)
         step.connection_id, step.socket_id = connection.identifier, socket.identifier
         # Explicit button only: never invent an automatic hardware acknowledgement.
         from datetime import datetime
         from .domain import validate_message
         _, peer = self.transport.resolve(step.connection_id, step.socket_id)
-        self.record_event({"time": datetime.now().astimezone().isoformat(timespec="milliseconds"), "mode": "MOCK", "direction": "RX", "source": "수신 예시 버튼", "connection_id": connection.identifier, "socket_id": socket.identifier, "peer": peer, "message": step.message, "headers": step.headers, "values": validate_message(step.message, step.headers, step.values), "big_endian": False})
+        message = self.messages[name]
+        values = validate_message(step.message, step.headers, step.values, self.messages)
+        event = {"time": datetime.now().astimezone().isoformat(timespec="milliseconds"), "mode": "MOCK", "direction": "RX", "source": "수신 예시 버튼", "connection_id": connection.identifier, "socket_id": socket.identifier, "peer": peer, "message": message.description if isinstance(message, IcdMessage) else name, "message_id": name, "headers": step.headers, "values": values, "big_endian": False}
+        if isinstance(message, IcdMessage):
+            event['data_elements'] = [{'sequence': field.sequence, 'name': field.name, 'value': values[field.key]} for field in message.elements]
+        self.record_event(event)
+
 
     def visible_events(self):
         self.flush_log_view()

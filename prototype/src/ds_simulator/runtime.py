@@ -6,15 +6,18 @@ from datetime import datetime
 from PySide6.QtCore import QObject, QTimer, Signal
 
 from .domain import iter_actions, validate_message
+from .preview_data import MESSAGES
+from .icd import IcdMessage
 
 
 class MockTransport(QObject):
     sent = Signal(dict)
 
-    def __init__(self, connections, sockets, parent=None):
+    def __init__(self, connections, sockets, parent=None, catalog=None):
         super().__init__(parent)
         self.connections = connections
         self.sockets = sockets
+        self.catalog = catalog or (lambda: MESSAGES)
 
     def resolve(self, connection_id, socket_id=""):
         connection = next((c for c in self.connections() if c.identifier == connection_id), None)
@@ -32,15 +35,19 @@ class MockTransport(QObject):
         return socket, peer
 
     def send(self, step, source="수동"):
-        values = validate_message(step.message, step.headers, step.values)
+        messages = self.catalog()
+        values = validate_message(step.message, step.headers, step.values, messages)
+        message = messages[step.message]
         socket, peer = self.resolve(step.connection_id, step.socket_id)
         event = {
             "time": datetime.now().astimezone().isoformat(timespec="milliseconds"),
             "mode": "MOCK", "direction": "TX", "source": source,
             "connection_id": step.connection_id, "socket_id": socket.identifier,
-            "peer": peer, "message": step.message, "headers": dict(step.headers),
+            "peer": peer, "message": message.description if isinstance(message, IcdMessage) else step.message, "message_id": step.message, "headers": dict(step.headers),
             "values": values, "big_endian": step.big_endian,
         }
+        if isinstance(message, IcdMessage):
+            event['data_elements'] = [{'sequence': field.sequence, 'name': field.name, 'value': values[field.key]} for field in message.elements]
         self.sent.emit(event)
         return event
 

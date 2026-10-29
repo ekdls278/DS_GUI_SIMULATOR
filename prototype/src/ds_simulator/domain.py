@@ -10,34 +10,47 @@ import tempfile
 from uuid import uuid4
 
 from .preview_data import MESSAGES
+from .icd import IcdMessage, catalog_payload, catalog_from_payload
 
 CATALOG_VERSION = "sample-1"
 MAX_ACTIONS = 10000
 
 
-def default_values(name):
-    return {key: value for key, _, value, _, _ in MESSAGES[name].fields}
+def default_values(name, catalog=None):
+    messages = MESSAGES if catalog is None else catalog
+    return {key: value for key, _, value, _, _ in messages[name].fields}
 
 
-def default_headers(name):
-    message = MESSAGES[name]
+def default_headers(name, catalog=None):
+    message = (MESSAGES if catalog is None else catalog)[name]
     return {key: getattr(message, key) for key in ("src", "dst", "cmd")}
 
 
-def validate_message(name, headers, values):
+def validate_message(name, headers, values, catalog=None):
     """Validate sample types only; hardware-specific limits remain unspecified."""
-    if name not in MESSAGES:
+    messages = MESSAGES if catalog is None else catalog
+    if name not in messages:
         raise ValueError(f"알 수 없는 ICD 메시지: {name}")
     if set(headers) != {"src", "dst", "cmd"}:
         raise ValueError("SRC / DST / CMD가 필요합니다.")
+    message = messages[name]
+    if isinstance(message, IcdMessage):
+        if not all(isinstance(value, str) for value in headers.values()) or headers['cmd'] != message.opcode:
+            raise ValueError('opcode가 선택한 ICD 정의와 일치하지 않습니다.')
+        if set(values) != {field.key for field in message.elements}:
+            raise ValueError('데이터 요소 구성이 선택한 ICD와 일치하지 않습니다.')
+        for field in message.elements:
+            if not isinstance(values[field.key], str) or (field.choices and values[field.key] not in field.choices):
+                raise ValueError(f'{field.label}: E열에 정의된 선택값을 사용하세요.')
+        return dict(values)
     for key, value in headers.items():
         if not isinstance(value, str) or not re.fullmatch(r"0[xX][0-9a-fA-F]+", value):
             raise ValueError(f"{key.upper()}: 0x로 시작하는 HEX 값을 입력하세요.")
-    expected = {entry[0] for entry in MESSAGES[name].fields}
+    expected = {entry[0] for entry in messages[name].fields}
     if set(values) != expected:
         raise ValueError(f"{name}: ICD 필드 구성이 일치하지 않습니다.")
     parsed = {}
-    for key, data_type, _, _, description in MESSAGES[name].fields:
+    for key, data_type, _, _, description in messages[name].fields:
         raw = values[key]
         if not isinstance(raw, str) or not raw.strip():
             raise ValueError(f"{description}: 값을 입력하세요.")
@@ -81,14 +94,15 @@ class Step:
     children: list = field(default_factory=list)
 
     @classmethod
-    def send(cls, name="SET_FREQUENCY"):
-        return cls("send", message=name, headers=default_headers(name), values=default_values(name))
+    def send(cls, name="SET_FREQUENCY", catalog=None):
+        return cls("send", message=name, headers=default_headers(name, catalog), values=default_values(name, catalog))
 
 
 @dataclass
 class Scenario:
     name: str = "주파수 설정 반복 시험"
     steps: list = field(default_factory=list)
+    catalog: dict | None = field(default=None, repr=False)
 
     @classmethod
     def example(cls):
@@ -126,7 +140,7 @@ class Scenario:
                 else:
                     if not isinstance(step.connection_id, str) or not step.connection_id or not isinstance(step.socket_id, str):
                         raise ValueError("송신 대상을 선택하세요.")
-                    validate_message(step.message, step.headers, step.values)
+                    validate_message(step.message, step.headers, step.values, self.catalog)
                     total += 1
                 if total > MAX_ACTIONS:
                     raise ValueError(f"시험당 최대 {MAX_ACTIONS:,}개 활동을 지원합니다.")
@@ -136,12 +150,18 @@ class Scenario:
 
     def to_dict(self):
         self.validate()
-        return {"format": "ds-scenario", "version": 1, "catalog": CATALOG_VERSION, **asdict(self)}
+        return {"format": "ds-scenario", "version": 1 if self.catalog is None else 2, "catalog": CATALOG_VERSION if self.catalog is None else catalog_payload(self.catalog), "name": self.name, "steps": [asdict(step) for step in self.steps]}
 
     @classmethod
     def from_dict(cls, data):
-        if not isinstance(data, dict) or data.get("format") != "ds-scenario" or type(data.get("version")) is not int or data["version"] != 1 or data.get("catalog") != CATALOG_VERSION:
-            raise ValueError("지원하는 시나리오 파일(sample-1, version 1)이 아닙니다.")
+        if not isinstance(data, dict) or data.get("format") != "ds-scenario" or type(data.get("version")) is not int:
+            raise ValueError("지원하는 시나리오 파일이 아닙니다.")
+        if data['version'] == 1 and data.get('catalog') == CATALOG_VERSION:
+            catalog = None
+        elif data['version'] == 2:
+            catalog = catalog_from_payload(data.get('catalog'))
+        else:
+            raise ValueError("시나리오 버전 또는 ICD 정의를 확인하세요.")
         nodes = 0
 
         def parse(items, depth=0):
@@ -164,7 +184,7 @@ class Scenario:
             return result
 
         try:
-            scenario = cls(data["name"], parse(data["steps"]))
+            scenario = cls(data["name"], parse(data["steps"]), catalog=catalog)
             scenario.validate()
         except (KeyError, TypeError, AttributeError, RecursionError):
             raise ValueError("시나리오 파일 구조가 올바르지 않습니다.") from None

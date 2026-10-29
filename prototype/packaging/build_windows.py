@@ -29,10 +29,10 @@ def main():
     shutil.copytree(ROOT / 'examples', resources / 'examples')
     shutil.copytree(ROOT / 'packaging' / 'licenses', resources / 'licenses')
     shutil.copy2(ROOT / 'packaging' / 'README-WINDOWS.txt', resources / 'README-WINDOWS.txt')
-    for package in ('PySide6-Essentials', 'shiboken6', 'PyInstaller'):
+    for package in ('PySide6-Essentials', 'shiboken6', 'PyInstaller', 'openpyxl', 'et-xmlfile', 'defusedxml'):
         package_distribution = distribution(package)
         for file in package_distribution.files or []:
-            if 'license' in str(file).lower() or 'copying' in str(file).lower():
+            if any(word in str(file).lower() for word in ('license', 'licence', 'copying')):
                 source = Path(package_distribution.locate_file(file))
                 if source.is_file():
                     relative = Path(*[part for part in Path(str(file)).parts if part not in ('.', '..')])
@@ -46,6 +46,7 @@ def main():
     report = {
         'platform': platform.platform(), 'python': platform.python_version(),
         'pyinstaller': version('PyInstaller'), 'pyside6': version('PySide6-Essentials'),
+        'openpyxl': version('openpyxl'), 'defusedxml': version('defusedxml'),
         'commit': os.environ.get('GITHUB_SHA', 'local'),
         'packaging': 'onefile', 'frozen_smoke_checks': [],
     }
@@ -83,6 +84,24 @@ def main():
                 raise RuntimeError(f'Standalone EXE failed to render the {page} page.')
             shutil.copy2(screenshot, validation / screenshot.name)
             report['frozen_smoke_checks'].append({'page': page, 'result': 'passed', 'standalone_copy': True})
+
+        from openpyxl import Workbook
+        workbook_path = Path(directory) / '가상-icd.xlsx'
+        book = Workbook()
+        sheet = book.active
+        sheet.title = '가상 장치(데이터)'
+        sheet.append(['opcode', '연동자료명', '순번', '데이터 요소', '데이터 상세 값'])
+        sheet.append(['0x0001', '가상 모드 설정', 1, '운용 모드', '중지 실행 자동'])
+        book.save(workbook_path)
+        book.close()
+        screenshot = Path(directory) / 'excel-import.png'
+        subprocess.run([str(standalone), '--icd-excel', str(workbook_path), '--icd-sheet', sheet.title,
+                        '--preview-stage', 'ready', '--screenshot', str(screenshot)],
+                       cwd=directory, env=environment, check=True, timeout=120)
+        if not screenshot.is_file() or screenshot.stat().st_size < 1000 or screenshot.read_bytes()[:8] != b'\x89PNG\r\n\x1a\n':
+            raise RuntimeError('Standalone EXE failed to import the synthetic Excel ICD.')
+        shutil.copy2(screenshot, validation / screenshot.name)
+        report['frozen_smoke_checks'].append({'page': 'excel-import', 'result': 'passed', 'standalone_copy': True})
 
     (validation / 'build-info.json').write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
     with executable.open('rb') as stream:

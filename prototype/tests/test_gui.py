@@ -7,7 +7,7 @@ import unittest
 from unittest.mock import patch
 
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QFont
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
@@ -300,6 +300,130 @@ class GuiTests(unittest.TestCase):
         self.assertEqual(self.window.log_table.rowCount(), 2000)
         self.assertFalse(self.window.log_table.selectionModel().hasSelection())
         self.assertEqual(self.window.traffic_history.snapshot().stats()['TX'], 2002)
+
+    def choose_excel_sheet(self, path, index=0, cancel=False):
+        from ds_simulator.icd_ui import SheetSelectionDialog
+        from PySide6.QtWidgets import QDialogButtonBox
+        def choose():
+            dialog = next(w for w in APP.topLevelWidgets() if isinstance(w, SheetSelectionDialog) and w.isVisible())
+            dialog.sheets.setCurrentRow(index)
+            action = QDialogButtonBox.StandardButton.Cancel if cancel else QDialogButtonBox.StandardButton.Ok
+            QTest.mouseClick(dialog.actions.button(action), Qt.MouseButton.LeftButton)
+        QTimer.singleShot(30, choose)
+        with patch('ds_simulator.icd_ui.QFileDialog.getOpenFileName', return_value=(str(path), 'Excel (*.xlsx *.xlsm)')):
+            self.window.import_excel_dialog()
+
+    def test_excel_chooser_imports_only_selected_sheet_and_composer_uses_choices(self):
+        from test_icd import make_workbook
+        from PySide6.QtWidgets import QComboBox, QLineEdit
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'synthetic.xlsx'; make_workbook(path)
+            self.choose_excel_sheet(path, index=1)
+        self.assertEqual(len(self.window.messages), 1)
+        self.assertEqual(self.window.message_catalog.item(0).text(), '0x0020\n가상 출력 설정')
+        self.assertEqual(self.window.scenario_editor.tree.topLevelItemCount(), 0)
+        self.window.message_catalog.setCurrentRow(0)  # Inspect without a connection.
+        choice = self.window.payload_inputs['field_0001']
+        free = self.window.payload_inputs['field_0002']
+        self.assertIsInstance(choice, QComboBox)
+        self.assertIsInstance(free, QLineEdit)
+        self.assertEqual([choice.itemText(i) for i in range(choice.count())], ['LOW', 'MEDIUM', 'HIGH'])
+        self.assertFalse(self.window.send_button.isEnabled())
+        choice.showPopup(); APP.processEvents()
+        index = choice.model().index(2, 0)
+        QTest.mouseClick(choice.view().viewport(), Qt.MouseButton.LeftButton, pos=choice.view().visualRect(index).center())
+        self.assertEqual(choice.currentText(), 'HIGH')
+        free.setText('사용자 직접 입력')
+        self.window.toggle_preview_connection()
+        self.assertTrue(self.window.send_button.isEnabled())
+        QTest.mouseClick(self.window.send_button, Qt.MouseButton.LeftButton)
+        record = self.window.log_events[0]
+        self.assertEqual(record['message'], '가상 출력 설정')
+        self.assertEqual(record['headers']['cmd'], '0x0020')
+        self.assertEqual(record['values']['field_0001'], 'HIGH')
+        self.assertEqual(record['values']['field_0002'], '사용자 직접 입력')
+        self.assertEqual(record['data_elements'][0]['name'], '출력 모드')
+        self.assertEqual(self.window.definition_catalog.rowCount(), 1)
+        self.assertEqual(self.window.definition_fields.rowCount(), 2)
+
+    def test_excel_cancel_or_parse_error_preserves_previous_catalog_and_scenario(self):
+        from test_icd import make_workbook
+        from openpyxl import load_workbook
+        original = self.window.scenario_editor.collect().to_dict()
+        before = dict(self.window.messages)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'synthetic.xlsx'; make_workbook(path)
+            self.choose_excel_sheet(path, cancel=True)
+            self.assertEqual(self.window.messages, before)
+            book = load_workbook(path); book['가상 장치 A(데이터)']['E2'] = '=1+1'; book.save(path); book.close()
+            with patch('ds_simulator.icd_ui.QMessageBox.warning') as warning:
+                self.choose_excel_sheet(path)
+                warning.assert_called_once()
+        self.assertEqual(self.window.messages, before)
+        self.assertEqual(self.window.scenario_editor.collect().to_dict(), original)
+
+    def test_imported_scenario_restores_choices_and_runs_without_excel(self):
+        from test_icd import make_workbook
+        from ds_simulator.icd import read_icd_sheet
+        from ds_simulator.preview_data import MESSAGES
+        from PySide6.QtWidgets import QComboBox
+        self.connect_first()
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'synthetic.xlsx'; make_workbook(path)
+            catalog = read_icd_sheet(path, '가상 장치 B(데이터)')
+            self.window.apply_catalog(catalog, '가상 선택 시트')
+            editor = self.window.scenario_editor
+            editor.palette.setCurrentRow(2); editor.add_selected()
+            choices = editor.properties.findChildren(QComboBox)
+            enum = next(w for w in choices if w.findText('HIGH') >= 0)
+            enum.setCurrentText('HIGH')
+            output = Path(directory) / 'scenario.json'
+            editor.save_to(output)
+            with patch('sys.excepthook') as exceptions:
+                self.window.apply_catalog(MESSAGES, '기본 예시')
+                path.unlink()
+                editor.load_from(output)
+                self.assertEqual(self.window.message_catalog.item(0).text(), '0x0020\n가상 출력 설정')
+                editor.run(); wait_until(lambda: not editor.runner.running)
+                self.assertEqual(self.window.log_events[0]['values']['field_0001'], 'HIGH')
+                self.assertEqual(editor.runner.completed, 1)
+                self.assertEqual(editor.collect().to_dict()['version'], 2)
+                APP.processEvents()
+                exceptions.assert_not_called()
+
+    def test_imported_catalog_is_scoped_to_one_window(self):
+        from test_icd import make_workbook
+        from ds_simulator.icd import read_icd_sheet
+        from ds_simulator.preview_data import MESSAGES
+        other = SimulatorWindow()
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / 'synthetic.xlsx'; make_workbook(path)
+                self.window.apply_catalog(read_icd_sheet(path, '가상 장치 B(데이터)'), '가상 시트')
+            self.assertEqual(len(self.window.messages), 1)
+            self.assertEqual(len(other.messages), 5)
+            self.assertEqual(len(MESSAGES), 5)
+        finally:
+            other.scenario_editor.dirty = False; other.close(); other.deleteLater()
+
+    def test_excel_import_is_blocked_while_scenario_is_running(self):
+        self.connect_first()
+        editor = self.window.scenario_editor
+        editor.document = Scenario(steps=[Step('wait', milliseconds=1000)]); editor.populate(); editor.run()
+        with patch('ds_simulator.icd_ui.QFileDialog.getOpenFileName') as picker, patch('ds_simulator.icd_ui.QMessageBox.information'):
+            self.window.import_excel_dialog()
+            picker.assert_not_called()
+        editor.runner.stop()
+
+    def test_excel_with_no_data_sheet_leaves_existing_ui_intact(self):
+        from openpyxl import Workbook
+        before = dict(self.window.messages)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'no-data.xlsx'; book = Workbook(); book.save(path); book.close()
+            with patch('ds_simulator.icd_ui.QFileDialog.getOpenFileName', return_value=(str(path), 'Excel')), patch('ds_simulator.icd_ui.QMessageBox.warning') as warning:
+                self.window.import_excel_dialog()
+                warning.assert_called_once()
+        self.assertEqual(self.window.messages, before)
 
     def test_manual_send_validation_and_actual_values_in_log(self):
         self.connect_first()
