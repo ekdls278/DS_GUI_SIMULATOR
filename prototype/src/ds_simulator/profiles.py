@@ -60,6 +60,7 @@ class ProfileMixin:
         connections = read_profiles(path)
         if self.scenario_editor.runner.running:
             raise ValueError("시험을 중지한 뒤 연결 설정을 불러오세요.")
+        self.transport.network.close_all()
         self.clear_message_selection()
         self.connections = connections
         self.sockets = []
@@ -105,10 +106,10 @@ class ProfileMixin:
         filename, _ = QFileDialog.getOpenFileName(self, "연결 설정 불러오기", "", "연결 설정 JSON (*.json)")
         if not filename:
             return
-        if self.sockets and QMessageBox.question(self, "연결 설정 변경", "현재 모의 연결을 해제하고 연결 설정을 바꿀까요?") != QMessageBox.StandardButton.Yes:
+        if self.sockets and QMessageBox.question(self, "연결 설정 변경", "현재 연결을 해제하고 연결 설정을 바꿀까요?") != QMessageBox.StandardButton.Yes:
             return
         try:
             self.load_profiles_from(filename)
-            self.statusBar().showMessage("연결 설정 불러오기 완료 · 연결 상태는 복원하지 않습니다. 모의 연결을 다시 진행하세요.", 6000)
+            self.statusBar().showMessage("연결 설정 불러오기 완료 · 연결 상태는 복원하지 않습니다. 다시 연결하세요.", 6000)
         except (OSError, ValueError) as exc:
             QMessageBox.warning(self, "불러오기 실패", str(exc))

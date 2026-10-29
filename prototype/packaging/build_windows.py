@@ -88,6 +88,14 @@ def main():
             report['frozen_smoke_checks'].append({'page': page, 'result': 'passed', 'standalone_copy': True})
 
         from openpyxl import Workbook
+        network_report = Path(directory) / 'network-check.json'
+        subprocess.run([str(standalone), '--network-self-test', str(network_report)],
+                       cwd=directory, env=environment, check=True, timeout=90)
+        network_result = json.loads(network_report.read_text(encoding='utf-8'))
+        if network_result.get('result') != 'passed' or len(network_result.get('checks', [])) != 4:
+            raise RuntimeError('Standalone EXE failed real TCP/UDP loopback validation.')
+        shutil.copy2(network_report, validation / network_report.name)
+        report['frozen_smoke_checks'].append({'page': 'network-loopback', 'result': 'passed', 'standalone_copy': True})
         workbook_path = Path(directory) / '가상-icd.xlsx'
         book = Workbook()
         sheet = book.active
@@ -111,7 +119,7 @@ def main():
                     content = ET.tostring(root, encoding='utf-8')
                 archive.writestr(item, content)
         screenshot = Path(directory) / 'excel-import.png'
-        subprocess.run([str(standalone), '--icd-excel', str(workbook_path), '--icd-sheet', sheet.title,
+        subprocess.run([str(standalone), '--mock', '--icd-excel', str(workbook_path), '--icd-sheet', sheet.title,
                         '--preview-stage', 'ready', '--screenshot', str(screenshot)],
                        cwd=directory, env=environment, check=True, timeout=120)
         if not screenshot.is_file() or screenshot.stat().st_size < 1000 or screenshot.read_bytes()[:8] != b'\x89PNG\r\n\x1a\n':

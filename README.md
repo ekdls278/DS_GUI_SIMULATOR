@@ -2,7 +2,7 @@
 
 **조작 가능한 기본 프로토타입:** [prototype/README.md](prototype/README.md)
 
-Excel ICD 시트 가져오기·블록 편집·모의 실행·실시간 통신 모니터·전용 로그·스펙트럼 독립 창이 추가된 버전은 `prototype/`에 있습니다.
+실제 TCP/UDP·HEX/UTF-8 송수신·Excel ICD 시트 가져오기·블록 편집·모의 실행·실시간 통신 모니터·전용 로그·스펙트럼 독립 창이 추가된 버전은 `prototype/`에 있습니다.
 **[실행 파일 ZIP 다운로드 — 저장소에 포함](https://github.com/ekdls278/DS_GUI_SIMULATOR/raw/refs/heads/main/prototype/DS-Simulator-Windows-x64.zip)**
 
 ZIP에는 단독 실행 가능한 `DS-Simulator.exe` 하나만 들어 있습니다. 압축을 풀고 EXE를 더블클릭하세요.
@@ -13,7 +13,7 @@ ZIP에는 단독 실행 가능한 `DS-Simulator.exe` 하나만 들어 있습니�
 
 아래는 루트 `src/`에 남아 있는 **초기 GUI 시안**의 설명입니다. 최신 구현과 실행 파일은 `prototype/`을 기준으로 사용하세요.
 최신 버전은 선택한 `(데이터)` 시트의 A~E열을 읽어 ICD 목록과 선택값을 구성하고 시나리오를 모의 실행합니다.
-실제 네트워크 통신·장비 제어는 아직 구현하지 않았습니다.
+최신 버전은 실제 TCP/UDP의 원문 HEX/UTF-8 송수신을 지원합니다. ICD 자동 인코딩·계측기 제어는 아직 구현하지 않았습니다.
 
 다른 계정이나 작업자는 먼저 [작업 인수인계 문서](HANDOFF.md)를 읽고 이어서 작업하세요.
 

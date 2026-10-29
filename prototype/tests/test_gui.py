@@ -102,7 +102,7 @@ class RunnerTests(unittest.TestCase):
 
 class GuiTests(unittest.TestCase):
     def setUp(self):
-        self.window = SimulatorWindow()
+        self.window = SimulatorWindow(mock=True)
         self.window.show()
         APP.processEvents()
 
@@ -415,7 +415,7 @@ class GuiTests(unittest.TestCase):
         from test_icd import make_workbook
         from ds_simulator.icd import read_icd_sheet
         from ds_simulator.preview_data import MESSAGES
-        other = SimulatorWindow()
+        other = SimulatorWindow(mock=True)
         try:
             with tempfile.TemporaryDirectory() as directory:
                 path = Path(directory) / 'synthetic.xlsx'; make_workbook(path)

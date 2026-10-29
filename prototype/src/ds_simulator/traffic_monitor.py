@@ -1,4 +1,4 @@
-"""Live timeline, rate bars and frozen display controls; all traffic is mock data."""
+"""Traffic timeline and display controls for explicitly labelled LIVE/MOCK records."""
 from datetime import datetime
 import json
 import time
@@ -63,7 +63,7 @@ class TimelineCanvas(QWidget):
         self.hits = []
         if not self.lanes:
             painter.setPen(QColor('#8190a5'))
-            painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, '선택한 시간에 기록이 없습니다. 송신하거나 모의 수신을 생성하세요.')
+            painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, '선택한 시간에 송수신 기록이 없습니다.')
             return
         for index, lane in enumerate(self.lanes):
             y = self.TOP + index * self.LANE
@@ -139,7 +139,8 @@ class TrafficMonitor(Card):
         self.history = history
         self.paused_snapshot = None
         self.manual_anchor = time.time()
-        heading = row(label('실시간 통신 모니터', 'heading'), chip('MOCK · 최근 2,000건'))
+        self.mode_chip = chip('최근 2,000건')
+        heading = row(label('실시간 통신 모니터', 'heading'), self.mode_chip)
         heading.addStretch()
         self.connection_filter = QComboBox()
         heading.addWidget(self.connection_filter)
@@ -161,6 +162,7 @@ class TrafficMonitor(Card):
         controls = row(label('■ TX 송신', color=TX), label('■ RX 수신', color=RX))
         controls.addStretch()
         mock = button('모의 수신 생성')
+        self.mock_button = mock
         mock.clicked.connect(receive)
         controls.addWidget(mock)
         self.follow = QCheckBox('실시간 따라가기')

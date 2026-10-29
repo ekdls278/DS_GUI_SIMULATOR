@@ -1,4 +1,4 @@
-"""Interactive mock simulator: no real sockets or instrument control."""
+"""TCP/UDP test workspace with explicit real and mock modes."""
 
 import argparse
 import ipaddress
@@ -11,14 +11,14 @@ from PySide6.QtWidgets import (
     QApplication, QButtonGroup, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
     QFormLayout, QFrame, QHBoxLayout, QLabel, QLineEdit, QMainWindow,
     QPlainTextEdit, QScrollArea, QSpinBox, QStackedWidget, QTableWidgetItem,
-    QVBoxLayout, QWidget,
+    QVBoxLayout, QWidget, QMessageBox,
 )
 
 from .theme import BLUE, STYLESHEET
 from .widgets import Card, SpectrumPlot, button, chip, icon, label, row, table
 from .workspace import WorkspaceMixin
 from .scenario_editor import ScenarioEditor
-from .runtime import MockTransport
+from .runtime import TransportRouter
 from .activity import ActivityMixin
 from .profiles import ProfileMixin
 from .icd_ui import IcdMixin
@@ -44,14 +44,15 @@ def divider() -> QFrame:
 
 
 class SimulatorWindow(WorkspaceMixin, ActivityMixin, ProfileMixin, IcdMixin, QMainWindow):
-    def __init__(self):
+    def __init__(self, mock=False):
         super().__init__()
-        self.setWindowTitle("DS Simulator — 화면 프로토타입")
+        self.setWindowTitle("DS Simulator — TCP/UDP 통신 시험")
         self.resize(1680, 1040)
         self.setMinimumSize(1180, 760)
         self.setWindowIcon(icon("logo", BLUE, 32))
         self.connections = list(CONNECTIONS)
-        self.sockets = [s for s in SOCKETS if s.connection_id != "TCP-01"]
+        self.sockets = [s for s in SOCKETS if s.connection_id != "TCP-01"] if mock else []
+        self.connection_errors = {}
         self.next_socket_number = 7
         self.selected_connection_index = 0
         self.selected_message_name = None
@@ -59,7 +60,9 @@ class SimulatorWindow(WorkspaceMixin, ActivityMixin, ProfileMixin, IcdMixin, QMa
         self.selected_peers = {}
         self.messages = dict(MESSAGES)
         self.catalog_source = "기본 예시 ICD"
-        self.transport = MockTransport(lambda: self.connections, lambda: self.sockets, self, catalog=lambda: self.messages)
+        self.transport = TransportRouter(lambda: self.connections, lambda: self.sockets, self, catalog=lambda: self.messages, live=not mock)
+        self.transport.network.changed.connect(self.network_changed)
+        self.transport.network.error.connect(self.network_error)
         self.initialize_activity()
         self.spectrum_window = None
         self.active_page = 0
@@ -86,7 +89,9 @@ class SimulatorWindow(WorkspaceMixin, ActivityMixin, ProfileMixin, IcdMixin, QMa
         self.setCentralWidget(root)
         self.select_connection(0)
         self.statusBar().setSizeGripEnabled(False)
-        self.statusBar().addWidget(label("   ●  MOCK 모드 · 실제 장비에 연결하지 않습니다. 스펙트럼은 정적 예시입니다.", "caption"))
+        self.mode_status = label('', 'caption')
+        self.statusBar().addWidget(self.mode_status)
+        self.refresh_mode_labels()
         self.statusBar().addPermanentWidget(label("DS Simulator   /   Prototype 0.2    ", "caption"))
 
     def make_header(self) -> QFrame:
@@ -115,9 +120,15 @@ class SimulatorWindow(WorkspaceMixin, ActivityMixin, ProfileMixin, IcdMixin, QMa
         load_profiles.clicked.connect(self.load_profiles_dialog)
         layout.addWidget(load_profiles)
         layout.addWidget(save_profiles)
-        layout.addWidget(chip("●  MOCK MODE"))
+        self.mode_select = QComboBox()
+        self.mode_select.addItem('실제 통신 · LIVE', True)
+        self.mode_select.addItem('모의 통신 · MOCK', False)
+        self.mode_select.setCurrentIndex(0 if self.transport.live else 1)
+        self.mode_select.setToolTip('통신 모드를 바꾸면 모든 연결을 해제합니다. 로그는 각 기록의 LIVE/MOCK 구분을 유지합니다.')
+        self.mode_select.currentIndexChanged.connect(self.change_transport_mode)
+        layout.addWidget(self.mode_select)
         layout.addSpacing(5)
-        layout.addWidget(label("예시 데이터", "muted"))
+        layout.addWidget(label("TCP / UDP", "muted"))
         return frame
 
     def make_sidebar(self) -> QFrame:
@@ -159,8 +170,8 @@ class SimulatorWindow(WorkspaceMixin, ActivityMixin, ProfileMixin, IcdMixin, QMa
         notes = QVBoxLayout(note)
         notes.setContentsMargins(12, 14, 12, 14)
         notes.setSpacing(9)
-        notes.addWidget(label("DESIGN PREVIEW", color="#b2c9ef"))
-        description = label("화면 구성과 조작 흐름을\n확인하는 프로토타입입니다.")
+        notes.addWidget(label("COMMUNICATION TEST", color="#b2c9ef"))
+        description = label("실제 통신: HEX·UTF-8 송수신\nICD 인코딩 규격은 별도 정의")
         description.setStyleSheet("color: #91a8c8; font-size: 11px; line-height: 1.6;")
         notes.addWidget(description)
         layout.addWidget(note)
@@ -187,8 +198,52 @@ class SimulatorWindow(WorkspaceMixin, ActivityMixin, ProfileMixin, IcdMixin, QMa
     def preview_notice(self, action: str):
         self.statusBar().showMessage(f"  {action} · 모의 동작이며 실제 네트워크 통신은 하지 않습니다.", 5500)
 
+    def network_changed(self):
+        if not self.transport.live:
+            return
+        self.sockets = self.transport.network.snapshots()
+        self.refresh_socket_monitor()
+
+    def network_error(self, cid, message):
+        self.connection_errors[cid] = message
+        self.statusBar().showMessage(f'{cid} · {message}', 15000)
+
+    def refresh_mode_labels(self):
+        live = self.transport.live
+        self.mode_status.setText('   ● LIVE · 실제 TCP/UDP · ICD 자동 인코딩 미정 · 스펙트럼은 정적 예시' if live else '   ● MOCK · 실제 패킷을 전송하지 않습니다.')
+        self.connection_mode_note.setText('실제 소켓을 연결합니다. 수신 데이터는 로그에 자동 기록됩니다.' if live else '연결·해제는 모의 동작입니다.')
+        self.connection_detail_note.setText('연결 후 실제 Local / Remote 주소를 표시합니다.' if live else 'Local / Remote 값은 예시입니다.')
+        self.connect_button.setToolTip('입력한 주소로 실제 소켓을 연결/해제합니다.' if live else '모의 연결 상태를 전환합니다.')
+        self.log_receive_button.setVisible(not live)
+        self.traffic_monitor.mock_button.setVisible(not live)
+        self.traffic_monitor.mode_chip.setText(f'{self.transport.label} · 최근 2,000건')
+        self.scenario_editor.refresh_mode()
+        self.update_send_button()
+
+    def change_transport_mode(self, index):
+        live = bool(self.mode_select.itemData(index))
+        if live == self.transport.live:
+            return
+        if self.scenario_editor.runner.running:
+            self.mode_select.blockSignals(True)
+            self.mode_select.setCurrentIndex(0 if self.transport.live else 1)
+            self.mode_select.blockSignals(False)
+            self.statusBar().showMessage('시험을 중지한 뒤 통신 모드를 변경하세요.', 5000)
+            return
+        # Both modes start disconnected after switching; never reuse mock socket IDs.
+        self.transport.live = False
+        self.transport.network.close_all()
+        self.sockets = []
+        self.selected_peers.clear()
+        self.clear_message_selection()
+        self.connection_errors.clear()
+        self.transport.live = live
+        self.send_format.setCurrentIndex(1 if live else 0)
+        self.refresh_socket_monitor()
+        self.refresh_mode_labels()
+
     def make_scenario_page(self):
-        page, layout = self.page("시나리오 편집기", "ICD 송신·대기·반복 블록으로 시험을 구성하고 모의 실행합니다.")
+        page, layout = self.page("시나리오 편집기", "송신·대기·반복 블록으로 시험을 구성합니다. 실제 통신은 직접 송신 블록을 사용하세요.")
         self.scenario_editor = ScenarioEditor(self)
         layout.addWidget(self.scenario_editor, 1)
         return page
@@ -200,6 +255,7 @@ class SimulatorWindow(WorkspaceMixin, ActivityMixin, ProfileMixin, IcdMixin, QMa
                 self.spectrum_window.close()
             self.traffic_monitor.timer.stop()
             self.log_refresh_timer.stop()
+            self.transport.network.close_all()
             event.accept()
         else:
             event.ignore()
@@ -240,7 +296,7 @@ class SimulatorWindow(WorkspaceMixin, ActivityMixin, ProfileMixin, IcdMixin, QMa
         self.spectrum_window.activateWindow()
 
     def make_sockets_page(self) -> QWidget:
-        page, layout = self.page("소켓 현황", "앱에서 관리하는 소켓의 상태와 Local / Remote 주소를 확인합니다. 현재 값은 모두 예시입니다.")
+        page, layout = self.page("소켓 현황", "앱에서 관리하는 소켓의 상태와 Local / Remote 주소를 확인합니다.")
         summary = QHBoxLayout()
         self.socket_stat_values = {}
         for title, state, description in (
@@ -258,7 +314,7 @@ class SimulatorWindow(WorkspaceMixin, ActivityMixin, ProfileMixin, IcdMixin, QMa
             summary.addWidget(card, 1)
         layout.addLayout(summary)
 
-        catalog = Card("앱 소켓 목록", "모의 상태")
+        catalog = Card("앱 소켓 목록")
         filters = QHBoxLayout()
         self.socket_count_label = label(f"소켓 {len(self.sockets)}개 · 서버 대기 소켓과 접속 소켓을 구분합니다.", "caption")
         filters.addWidget(self.socket_count_label)
@@ -394,10 +450,10 @@ class SimulatorWindow(WorkspaceMixin, ActivityMixin, ProfileMixin, IcdMixin, QMa
             self.socket_detail_labels[key].setText(value)
         self.socket_config_note.setText(f"연결 설정  |  Local Bind: {connection.local_endpoint}  |  Remote 대상: {connection.remote_endpoint or '접속한 클라이언트에 따라 결정'}")
         note = {
-            "Client": "Local Port 0(자동)을 설정하면 연결 후 운영체제가 배정한 포트를 표시합니다. 위 주소와 포트는 예시입니다.",
+            "Client": "Local Port 0(자동)을 설정하면 연결 후 운영체제가 배정한 포트를 표시합니다.",
             "Listen": "LISTENING은 접속을 기다리는 소켓입니다. Remote는 없으며, 송신하려면 Accepted 소켓을 선택합니다.",
             "Accepted": "서버가 수락한 개별 연결입니다. 같은 Local Port를 사용해도 Remote IP·Port로 각 클라이언트를 구분합니다.",
-            "UDP": f"이 UDP 소켓은 바인딩만 한 예시입니다. 고정된 연결 상대는 없고, 송신 대상 설정은 {connection.remote_endpoint}입니다.",
+            "UDP": f"UDP는 고정된 연결 상대가 없습니다. 각 수신의 발신 주소는 로그에서 확인합니다. 송신 대상 설정은 {connection.remote_endpoint}입니다.",
         }
         self.socket_role_note.setText(note[item.role])
         self.socket_use_button.setEnabled(item.state == "ESTABLISHED" or (item.state == "BOUND" and bool(connection.remote_endpoint)))
@@ -469,9 +525,13 @@ class SimulatorWindow(WorkspaceMixin, ActivityMixin, ProfileMixin, IcdMixin, QMa
         layout.addLayout(bottom, 1)
         return page
 
-    def show_connection_dialog(self):
+    def show_connection_dialog(self, checked=False, *, edit=False):
+        original = self.selected_connection() if edit else None
+        if edit and self.connection_sockets(original):
+            QMessageBox.information(self, '연결 설정', '연결을 해제한 뒤 설정을 편집하세요.')
+            return
         dialog = QDialog(self)
-        dialog.setWindowTitle("연결 추가 · 화면 미리보기")
+        dialog.setWindowTitle('연결 설정 편집' if edit else '연결 추가')
         dialog.setMinimumWidth(470)
         layout = QVBoxLayout(dialog)
         layout.setContentsMargins(24, 24, 24, 24)
@@ -485,7 +545,7 @@ class SimulatorWindow(WorkspaceMixin, ActivityMixin, ProfileMixin, IcdMixin, QMa
         name.setMaxLength(24)
         mode = combo(["TCP Client", "TCP Server", "UDP"])
         mode.setObjectName("connectionMode")
-        remote_host = QLineEdit("192.168.0.12")
+        remote_host = QLineEdit("127.0.0.1")
         remote_host.setObjectName("remoteHost")
         local_host = QLineEdit("0.0.0.0")
         local_host.setObjectName("localHost")
@@ -509,10 +569,10 @@ class SimulatorWindow(WorkspaceMixin, ActivityMixin, ProfileMixin, IcdMixin, QMa
         address_note = label("Local IP 0.0.0.0: 모든 인터페이스 · Local Port 0: 자동 배정\n연결 후 Local / Remote 주소는 소켓 현황에서 확인합니다.", "caption")
         address_note.setWordWrap(True)
         layout.addWidget(address_note)
-        layout.addWidget(chip("UI PREVIEW · 프로파일만 추가하며 소켓은 생성하지 않습니다."))
+        layout.addWidget(label('설정 저장 후 연결 버튼을 누르면 연결합니다.', 'caption'))
         actions = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         confirm = actions.button(QDialogButtonBox.StandardButton.Ok)
-        confirm.setText("예시 연결 추가")
+        confirm.setText('설정 적용' if edit else '연결 추가')
         confirm.setObjectName("primary")
         actions.button(QDialogButtonBox.StandardButton.Cancel).setText("취소")
         def validate():
@@ -537,6 +597,16 @@ class SimulatorWindow(WorkspaceMixin, ActivityMixin, ProfileMixin, IcdMixin, QMa
         for edit in (name, remote_host, local_host):
             edit.textChanged.connect(validate)
         mode.currentIndexChanged.connect(change_mode)
+        if original:
+            name.setText(original.name)
+            mode.setCurrentText(original.mode)
+            host, port = original.local_endpoint.rsplit(':', 1)
+            local_host.setText(host); local_port.setValue(int(port))
+            if original.remote_endpoint:
+                host, port = original.remote_endpoint.rsplit(':', 1)
+                remote_host.setText(host); remote_port.setValue(int(port))
+            form.setRowVisible(remote_host, original.mode != 'TCP Server')
+            form.setRowVisible(remote_port, original.mode != 'TCP Server')
         actions.accepted.connect(dialog.accept)
         actions.rejected.connect(dialog.reject)
         layout.addWidget(actions)
@@ -547,11 +617,22 @@ class SimulatorWindow(WorkspaceMixin, ActivityMixin, ProfileMixin, IcdMixin, QMa
             while f"{prefix}-{number:02}" in identifiers:
                 number += 1
             connection = ConnectionPreview(
-                f"{prefix}-{number:02}", name.text().strip(), mode.currentText(),
+                original.identifier if original else f"{prefix}-{number:02}", name.text().strip(), mode.currentText(),
                 f"{local_host.text().strip()}:{local_port.value()}",
                 "" if mode.currentText() == "TCP Server" else f"{remote_host.text().strip()}:{remote_port.value()}",
             )
-            self.add_connection_preview(connection)
+            if original:
+                self.connections[self.selected_connection_index] = connection
+                self.clear_connection_cards()
+                for index, item in enumerate(self.connections):
+                    self.append_connection_button(index, item)
+                    self.log_connection_filter.setItemText(index + 1, item.title)
+                    self.socket_connection_filter.setItemText(index + 1, item.title)
+                self.connection_errors.pop(connection.identifier, None)
+                self.select_connection(self.selected_connection_index)
+                self.traffic_monitor.set_connections(self.connections)
+            else:
+                self.add_connection_preview(connection)
 
     def add_connection_preview(self, connection: ConnectionPreview):
         if any(item.identifier == connection.identifier for item in self.connections):
@@ -575,22 +656,27 @@ def main() -> int:
     parser.add_argument("--preview-stage", choices=("initial", "connected", "ready"), default="initial", help="워크스페이스의 모의 연결/ICD 선택 단계")
     parser.add_argument("--icd-excel", type=Path, help="로컬 Excel에서 지정한 데이터 시트를 가져옵니다")
     parser.add_argument("--icd-sheet", help="가져올 (데이터) 시트 이름")
+    parser.add_argument('--mock', action='store_true', help='실제 통신 없이 모의 화면을 실행합니다.')
+    parser.add_argument('--network-self-test', type=Path, help=argparse.SUPPRESS)
     args = parser.parse_args()
     if bool(args.icd_excel) != bool(args.icd_sheet):
         parser.error("--icd-excel과 --icd-sheet를 함께 지정하세요.")
     app = QApplication(sys.argv[:1])
+    if args.network_self_test:
+        from .network_check import run_check
+        return run_check(args.network_self_test)
     app.setStyle("Fusion")
     families = QFontDatabase.families()
     font_family = next((f for f in ("Malgun Gothic", "맑은 고딕", "Noto Sans CJK KR", "Segoe UI") if f in families), "Sans Serif")
     app.setFont(QFont(font_family, 10))
     app.setStyleSheet(STYLESHEET)
-    window = SimulatorWindow()
+    window = SimulatorWindow(mock=args.mock)
     if args.icd_excel:
         try:
             window.apply_catalog(read_icd_sheet(args.icd_excel, args.icd_sheet), f"{args.icd_excel.name} · {args.icd_sheet}")
         except (OSError, ValueError) as exc:
             parser.error(str(exc))
-    if args.preview_stage != "initial":
+    if args.preview_stage != "initial" and args.mock:
         window.toggle_preview_connection()
         if args.preview_stage == "ready":
             window.message_catalog.setCurrentRow(0)

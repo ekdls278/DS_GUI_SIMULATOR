@@ -128,14 +128,16 @@ class ConnectionCard(QFrame):
             state_color, state_background = ('#3264e8', '#eaf1ff') if listener else ('#7b8799', '#eef1f5')
             remote = '아래 클라이언트에서 선택'
             self.remote_label.setText('Remote · 상대')
-            self.header.setToolTip(f'{connection.title}\n서버 수신 주소: {local}\n0.0.0.0은 내 PC의 모든 인터페이스를 뜻합니다.\n송신하려면 아래 접속 클라이언트를 선택하세요. (모의 상태)')
+            self.header.setToolTip(f'{connection.title}\n서버 수신 주소: {local}\n0.0.0.0은 내 PC의 모든 인터페이스를 뜻합니다.\n송신하려면 아래 접속 클라이언트를 선택하세요.')
             self.update_peers(peers, selected_id if active else None)
         else:
             state = ('연결됨' if connection.mode == 'TCP Client' else '수신 대기') if sockets else '미연결'
+            if sockets and sockets[0].state == 'CONNECTING':
+                state = '접속 중'
             state_color, state_background = ('#17845c', '#e9f7ef') if sockets else ('#7b8799', '#eef1f5')
             remote = connection.remote_endpoint
             self.remote_label.setText('Target · 송신' if connection.mode == 'UDP' else 'Remote · 상대')
-            self.header.setToolTip(f'{connection.mode} · {state}\nLocal {local}\nRemote {remote}\n주소와 상태는 예시입니다.')
+            self.header.setToolTip(f'{connection.mode} · {state}\nLocal {local}\nRemote {remote}')
         self.local_value.setText(local)
         self.remote_value.setText(remote)
         self.status_badge.setText(f'● {state}')

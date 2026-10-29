@@ -1,11 +1,11 @@
-"""Same-screen socket → connect → ICD → send flow. All connections are simulated."""
+"""Socket selection and explicit ICD/mock or raw real-data composition."""
 
 from PySide6.QtCore import QRegularExpression, Qt
 from PySide6.QtGui import QRegularExpressionValidator
 from PySide6.QtWidgets import (
     QButtonGroup, QCheckBox, QFormLayout, QFrame, QHBoxLayout, QLineEdit,
     QListWidget, QListWidgetItem, QScrollArea, QTabWidget,
-    QVBoxLayout, QWidget,
+    QVBoxLayout, QWidget, QComboBox, QPlainTextEdit,
 )
 
 from .preview_data import SocketPreview
@@ -15,11 +15,12 @@ from .icd_widgets import make_field_input, input_value, connect_input
 from .connection_cards import ConnectionCard
 from .theme import BLUE
 from .widgets import Card, button, chip, label, row
+from .wire import encode_raw
 
 
 class WorkspaceMixin:
     def make_workspace(self):
-        page, layout = self.page("ICD 송수신", "같은 화면에서 소켓을 연결하고, ICD 메시지를 선택해 송신합니다.")
+        page, layout = self.page("ICD 송수신", "소켓을 연결하고 HEX·UTF-8 데이터를 송수신합니다. ICD 항목도 조회·편집할 수 있습니다.")
         layout.setSpacing(12)
         steps = Card()
         steps.body.setContentsMargins(16, 9, 16, 9)
@@ -75,13 +76,17 @@ class WorkspaceMixin:
         scroll.setWidget(items)
         body.addWidget(scroll, 1)
         self.connect_button = button("연결", primary=True, icon_name="link")
-        self.connect_button.setToolTip("화면에서 연결 상태만 변경합니다. 실제 소켓은 생성하지 않습니다.")
         self.connect_button.clicked.connect(self.toggle_preview_connection)
         body.addWidget(self.connect_button)
         self.accept_demo_button = button("클라이언트 접속 예시 추가")
         self.accept_demo_button.clicked.connect(self.accept_preview_peer)
         body.addWidget(self.accept_demo_button)
-        body.addWidget(label("연결·해제는 화면 검토용 모의 동작입니다.", "caption"))
+        self.connection_mode_note = label('', 'caption')
+        self.connection_mode_note.setWordWrap(True)
+        body.addWidget(self.connection_mode_note)
+        self.connection_error_note = label('', 'caption')
+        self.connection_error_note.setWordWrap(True)
+        body.addWidget(self.connection_error_note)
         self.socket_tabs.addTab(overview, "소켓 현황")
 
         details = QWidget()
@@ -95,12 +100,16 @@ class WorkspaceMixin:
         details_layout.addWidget(self.left_connection_title)
         details_layout.addWidget(self.left_connection_info)
         details_layout.addStretch()
-        details_layout.addWidget(label("Local / Remote 값은 모두 예시입니다.", "caption"))
+        self.connection_detail_note = label('', 'caption')
+        details_layout.addWidget(self.connection_detail_note)
         self.socket_tabs.addTab(details, "연결 정보")
         card.body.addWidget(self.socket_tabs, 1)
         add = button("소켓 프로파일 추가", icon_name="plus")
         add.clicked.connect(self.show_connection_dialog)
         card.body.addWidget(add)
+        edit = button('선택한 연결 설정 편집')
+        edit.clicked.connect(lambda: self.show_connection_dialog(edit=True))
+        card.body.addWidget(edit)
         self.connection_group.idClicked.connect(self.select_connection_header)
         return card
 
@@ -194,7 +203,7 @@ class WorkspaceMixin:
             self.update_send_button()
 
     def make_composer(self):
-        card = Card("메시지 편집 · 송신", "ICD")
+        card = Card("메시지 편집 · 송신")
         card.setMinimumWidth(410)
         card.body.setSpacing(10)
         target = QFrame()
@@ -207,6 +216,22 @@ class WorkspaceMixin:
         target_layout.addWidget(self.target_title)
         target_layout.addWidget(self.target_address)
         card.body.addWidget(target)
+        self.send_format = QComboBox()
+        for title, value in [('ICD 필드 (모의 송신)', 'icd'), ('HEX 직접 송신', 'hex'), ('UTF-8 텍스트 직접 송신', 'utf8')]:
+            self.send_format.addItem(title, value)
+        self.send_format.setCurrentIndex(1 if self.transport.live else 0)
+        card.body.addWidget(self.send_format)
+        self.raw_editor = QPlainTextEdit()
+        self.raw_editor.setPlaceholderText('HEX 예: AA BB 00 01\n텍스트는 입력한 내용 그대로 UTF-8로 송신합니다.')
+        self.raw_editor.setMaximumHeight(110)
+        card.body.addWidget(self.raw_editor)
+        self.raw_ending = QComboBox()
+        for title, ending in [('줄 끝 추가 없음', ''), ('LF 추가 (0A)', '\n'), ('CRLF 추가 (0D 0A)', '\r\n')]:
+            self.raw_ending.addItem(title, ending)
+        card.body.addWidget(self.raw_ending)
+        self.raw_note = label('입력한 바이트 순서대로 전송합니다. 헤더·길이·체크섬은 자동으로 붙이지 않습니다.\nTCP 수신 로그 한 건은 읽은 조각이며 ICD 메시지 경계와 다를 수 있습니다.', 'caption')
+        self.raw_note.setWordWrap(True)
+        card.body.addWidget(self.raw_note)
         self.message_title = label("ICD 메시지를 선택하세요", "heading")
         self.message_description = label("선택한 메시지의 필드가 여기에 표시됩니다.", "muted")
         card.body.addWidget(self.message_title)
@@ -249,6 +274,9 @@ class WorkspaceMixin:
         self.send_button = button("소켓을 먼저 연결하세요", primary=True, icon_name="arrow")
         self.send_button.clicked.connect(self.preview_send)
         card.body.addWidget(self.send_button)
+        self.send_format.currentIndexChanged.connect(self.update_send_button)
+        self.raw_editor.textChanged.connect(self.update_send_button)
+        self.raw_ending.currentIndexChanged.connect(self.update_send_button)
         return card
 
     def selected_connection(self):
@@ -306,6 +334,7 @@ class WorkspaceMixin:
         name = item.data(Qt.ItemDataRole.UserRole)
         message = self.messages[name]
         self.selected_message_name = name
+        self.send_format.setCurrentIndex(0)
         self.message_title.setText(message.description)
         self.message_description.setText(f"opcode {message.cmd}  ·  데이터 요소 {len(message.fields)}개")
         imported = isinstance(message, IcdMessage)
@@ -337,6 +366,8 @@ class WorkspaceMixin:
         if current:
             remote_text = remote + (" (전송 대상)" if current.role == "UDP" else "")
             detail = f"{current.identifier} · {current.state}\nLocal    {current.local_endpoint}\nRemote  {remote_text}"
+        elif sockets and sockets[0].state == 'CONNECTING':
+            detail = f'CONNECTING · TCP 접속 중\nLocal {sockets[0].local_endpoint}\nRemote {remote}'
         elif sockets:
             detail = f"LISTENING · 클라이언트 접속 / 선택 대기\nLocal    {sockets[0].local_endpoint}\nRemote  선택 대기"
         else:
@@ -345,36 +376,63 @@ class WorkspaceMixin:
         self.left_connection_title.setText(connection.title)
         self.left_connection_info.setText(f"{connection.mode}\n\n{detail}\n\n설정 Local Bind\n{connection.local_endpoint}\n\n설정 Remote\n{connection.remote_endpoint or '접속 후 결정'}")
         self.connect_button.setText("연결 해제" if sockets else ("서버 대기 시작" if connection.mode == "TCP Server" else "연결"))
-        self.accept_demo_button.setVisible(connection.mode == "TCP Server" and bool(sockets))
+        self.accept_demo_button.setVisible(not self.transport.live and connection.mode == "TCP Server" and bool(sockets))
+        self.connection_error_note.setText(self.connection_errors.get(connection.identifier, ''))
         ready = current is not None and bool(remote)
         self.message_catalog.setEnabled(True)
         self.message_search.setEnabled(True)
+        raw = self.send_format.currentData() != 'icd'
+        self.flow_steps[2].setText('03  데이터 입력' if raw else '03  ICD 선택')
+        self.editor.setVisible(not raw)
         self.editor.setEnabled(self.selected_message_name is not None)
+        self.message_title.setVisible(not raw)
+        self.message_description.setVisible(not raw)
+        self.raw_editor.setVisible(raw)
+        self.raw_note.setVisible(raw)
+        self.raw_ending.setVisible(self.send_format.currentData() == 'utf8')
+        self.big_endian.setVisible(not raw)
         self.catalog_hint.setText("메시지를 선택해 데이터 요소를 편집하세요." if ready else "조회·편집은 가능합니다. 송신하려면 연결과 대상을 선택하세요.")
-        valid = ready and self.selected_message_name is not None
+        valid = ready and (raw or self.selected_message_name is not None)
         error = ""
+        if self.transport.live and not raw:
+            error = 'ICD 바이트 규격이 미정입니다. 실제 송신은 HEX/UTF-8 직접 송신을 선택하세요.'
+            valid = False
         if valid:
             try:
-                validate_message(self.selected_message_name, {k: e.text() for k, e in self.header_inputs.items()}, {k: input_value(e) for k, e in self.payload_inputs.items()}, self.messages)
+                if raw:
+                    step = self.raw_step()
+                    encode_raw(step.wire_format, step.wire_data)
+                    self.transport.validate_step(step)
+                else:
+                    validate_message(self.selected_message_name, {k: e.text() for k, e in self.header_inputs.items()}, {k: input_value(e) for k, e in self.payload_inputs.items()}, self.messages)
             except ValueError as exc:
                 error = str(exc)
                 valid = False
-        self.send_button.setToolTip(error or "모의 송신 로그를 기록합니다. 실제 패킷은 전송하지 않습니다.")
+        self.send_button.setToolTip(error or ('실제 데이터를 송신 버퍼에 넣습니다. 장치 수신 완료를 의미하지 않습니다.' if self.transport.live else '모의 송신 로그를 기록합니다.'))
         self.send_feedback.setText(error)
         self.send_button.setEnabled(valid)
         if not ready:
             self.send_button.setText("접속 클라이언트를 선택하세요" if sockets else "소켓을 먼저 연결하세요")
-        elif self.selected_message_name is None:
+        elif self.selected_message_name is None and not raw:
             self.send_button.setText("ICD 메시지를 선택하세요")
         else:
             self.send_button.setText(f"{connection.title}로 송신")
-        stage = 1 if not ready else (2 if self.selected_message_name is None else 3)
+        stage = 1 if not ready else (2 if self.selected_message_name is None and not raw else 3)
         for index, item in enumerate(self.flow_steps):
             color, background = ("#1a9264", "#eaf8f1") if index < stage else ((BLUE, "#e8efff") if index == stage else ("#7b8799", "#f0f3f8"))
             item.setStyleSheet(f"color: {color}; background: {background}; border-radius: 5px; padding: 6px 14px;")
         self.flow_hint.setText(("ICD 조회·편집 가능 · 연결 후 송신", "연결됨 · ICD를 선택하세요", "대상과 필드 확인 후 송신")[stage - 1])
         if not ready and sockets:
-            self.flow_hint.setText("서버 대기 중 · 접속 클라이언트를 선택하세요")
+            self.flow_hint.setText('TCP 접속 중 · 연결 해제로 취소 가능' if sockets[0].state == 'CONNECTING' else '서버 대기 중 · 접속 클라이언트를 선택하세요')
+
+    def raw_step(self):
+        text = self.raw_editor.toPlainText()
+        if self.send_format.currentData() == 'utf8':
+            text += self.raw_ending.currentData()
+        current = self.current_socket()
+        return Step('raw', connection_id=self.selected_connection().identifier,
+                    socket_id=current.identifier if current else '',
+                    wire_format=self.send_format.currentData(), wire_data=text)
 
     def new_socket_id(self):
         identifier = f"SOCK-{self.next_socket_number:03}"
@@ -383,6 +441,17 @@ class WorkspaceMixin:
 
     def toggle_preview_connection(self):
         connection = self.selected_connection()
+        if self.transport.live:
+            self.connection_errors.pop(connection.identifier, None)
+            if self.connection_sockets(connection):
+                self.transport.network.close_connection(connection.identifier)
+            else:
+                try:
+                    self.transport.network.open(connection)
+                except ValueError as exc:
+                    self.network_error(connection.identifier, str(exc))
+            self.update_send_button()
+            return
         if self.connection_sockets(connection):
             self.clear_message_selection()
             self.sockets = [s for s in self.sockets if s.connection_id != connection.identifier]
@@ -404,6 +473,8 @@ class WorkspaceMixin:
         self.preview_notice("연결 상태 전환 (모의)")
 
     def accept_preview_peer(self):
+        if self.transport.live:
+            return
         connection = self.selected_connection()
         listener = next((s for s in self.connection_sockets(connection) if s.role == "Listen"), None)
         if listener is None:
@@ -423,6 +494,13 @@ class WorkspaceMixin:
             return
         current = self.current_socket()
         connection = self.selected_connection()
+        if self.send_format.currentData() != 'icd':
+            try:
+                event = self.transport.send(self.raw_step())
+                self.send_feedback.setText(f"{event['mode']} · {event['values']['bytes']}바이트 · {event['status']}\n{current.local_endpoint} → {event['peer']} (상대 수신 완료를 보장하지 않음)")
+            except ValueError as exc:
+                self.send_feedback.setText(str(exc))
+            return
         step = Step.send(self.selected_message_name, self.messages)
         step.connection_id, step.socket_id = connection.identifier, current.identifier
         step.headers = {k: e.text() for k, e in self.header_inputs.items()}

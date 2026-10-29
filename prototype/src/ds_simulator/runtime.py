@@ -1,4 +1,4 @@
-"""Shared mock sender and cancellable Qt scenario runner. Never opens sockets."""
+"""Switchable network/mock sender and cancellable Qt scenario runner."""
 
 from copy import deepcopy
 from datetime import datetime
@@ -8,10 +8,13 @@ from PySide6.QtCore import QObject, QTimer, Signal
 from .domain import iter_actions, validate_message
 from .preview_data import MESSAGES
 from .icd import IcdMessage
+from .network import NetworkTransport
+from .wire import encode_raw
 
 
 class MockTransport(QObject):
     sent = Signal(dict)
+    label = 'MOCK'
 
     def __init__(self, connections, sockets, parent=None, catalog=None):
         super().__init__(parent)
@@ -35,6 +38,13 @@ class MockTransport(QObject):
         return socket, peer
 
     def send(self, step, source="수동"):
+        if step.kind == 'raw':
+            data = encode_raw(step.wire_format, step.wire_data)
+            current, peer = self.resolve(step.connection_id, step.socket_id)
+            event = NetworkTransport.event(current, peer, data, 'TX', source)
+            event.update(mode='MOCK', status='SIMULATED')
+            self.sent.emit(event)
+            return event
         messages = self.catalog()
         values = validate_message(step.message, step.headers, step.values, messages)
         message = messages[step.message]
@@ -50,6 +60,34 @@ class MockTransport(QObject):
             event['data_elements'] = [{'sequence': field.sequence, 'name': field.name, 'value': values[field.key]} for field in message.elements]
         self.sent.emit(event)
         return event
+
+
+class TransportRouter(QObject):
+    sent = Signal(dict)
+    received = Signal(dict)
+
+    def __init__(self, connections, sockets, parent=None, catalog=None, live=True):
+        super().__init__(parent)
+        self.live = live
+        self.mock = MockTransport(connections, sockets, self, catalog)
+        self.network = NetworkTransport(connections, self)
+        self.mock.sent.connect(self.sent)
+        self.network.sent.connect(self.sent)
+        self.network.received.connect(self.received)
+
+    @property
+    def label(self):
+        return 'LIVE' if self.live else 'MOCK'
+
+    def resolve(self, connection_id, socket_id=''):
+        return (self.network if self.live else self.mock).resolve(connection_id, socket_id)
+
+    def validate_step(self, step):
+        if self.live:
+            self.network.validate_step(step)
+
+    def send(self, step, source='수동'):
+        return (self.network if self.live else self.mock).send(step, source)
 
 
 class ScenarioRunner(QObject):
@@ -80,7 +118,9 @@ class ScenarioRunner(QObject):
             for step in steps:
                 if step.kind == "repeat" and not step.children:
                     raise ValueError("빈 반복 블록에 활동을 추가하세요.")
-                if step.kind == "send":
+                if step.kind in ("send", 'raw'):
+                    if hasattr(self.transport, 'validate_step'):
+                        self.transport.validate_step(step)
                     socket, _ = self.transport.resolve(step.connection_id, step.socket_id)
                     step.socket_id = socket.identifier
                 bind(step.children)
@@ -90,7 +130,7 @@ class ScenarioRunner(QObject):
         self.completed, self.total = 0, total
         self.pending = None
         self.running = True
-        self.changed.emit("모의 실행 중")
+        self.changed.emit(f"{self.transport.label} 실행 중")
         self.timer.start(0)
 
     def advance(self):

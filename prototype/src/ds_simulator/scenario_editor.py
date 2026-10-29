@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QFileDialog, QFormLayout,
     QHBoxLayout, QLineEdit, QListWidget, QListWidgetItem, QMessageBox,
     QScrollArea, QSpinBox, QStyledItemDelegate, QStyle, QTreeWidget,
-    QTreeWidgetItem, QVBoxLayout, QWidget,
+    QTreeWidgetItem, QVBoxLayout, QWidget, QPlainTextEdit,
 )
 
 from .domain import Scenario, Step, load_scenario, save_json
@@ -19,7 +19,7 @@ from .runtime import ScenarioRunner
 from .widgets import Card, button, chip, label, row
 
 ROLE = Qt.ItemDataRole.UserRole
-COLORS = {"send": "#4a71dd", "wait": "#5c9fba", "repeat": "#d99c30"}
+COLORS = {"send": "#4a71dd", "raw": '#347c93', "wait": "#5c9fba", "repeat": "#d99c30"}
 
 
 class BlockTree(QTreeWidget):
@@ -66,7 +66,7 @@ class ScenarioEditor(QWidget):
     def __init__(self, window):
         super().__init__()
         self.window = window
-        self.document = Scenario.example()
+        self.document = Scenario('새 통신 시험') if window.transport.live else Scenario.example()
         self.path = None
         self.dirty = False
         self.loading = False
@@ -77,7 +77,8 @@ class ScenarioEditor(QWidget):
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         toolbar = Card()
-        actions = row(chip("MOCK · 모의 시험"))
+        self.mode_chip = chip(window.transport.label)
+        actions = row(self.mode_chip)
         self.name_input = QLineEdit(self.document.name)
         self.name_input.setMaxLength(200)
         self.name_input.textEdited.connect(self.mark_dirty)
@@ -160,7 +161,7 @@ class ScenarioEditor(QWidget):
         self.form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
         scroll.setWidget(self.properties)
         inspector.body.addWidget(scroll, 1)
-        hint = label("실제 네트워크 전송은 하지 않습니다.\n서버는 접속 클라이언트를 선택하세요.\n예시 ICD 자료형 범위만 검사합니다.", "caption")
+        hint = label("실제 통신은 HEX·UTF-8 직접 송신 블록을 사용합니다.\n서버는 접속 클라이언트를 선택하세요.\n완료는 장치의 수신·정상 동작 판정이 아닙니다.", "caption")
         hint.setWordWrap(True)
         inspector.body.addWidget(hint)
         panels.addWidget(inspector, 32)
@@ -177,11 +178,12 @@ class ScenarioEditor(QWidget):
         self.palette.clear()
         items = [("↻  횟수 반복", "repeat", ""), ("◷  시간 대기", "wait", "")]
         items.extend((f"{message.cmd}\n{message.description}", "send", key) for key, message in self.window.messages.items())
+        items.append(('직접 송신\nHEX / UTF-8 바이트', 'raw', ''))
         for title, kind, key in items:
             item = QListWidgetItem(title)
             item.setData(ROLE, (kind, key))
             self.palette.addItem(item)
-        self.palette.setCurrentRow(2 if len(items) > 2 else 0)
+        self.palette.setCurrentRow(len(items) - 1 if self.window.transport.live else 2)
         self.filter_palette(self.palette_search.text())
 
     def reset_for_catalog(self):
@@ -192,7 +194,12 @@ class ScenarioEditor(QWidget):
         self.populate()
         self.dirty = False
         self.file_label.setText("저장하지 않은 시험")
-        self.status.setText("가져온 ICD로 새 시험을 구성하세요. 연결 및 블록의 값을 확인한 뒤 모의 실행합니다.")
+        self.status.setText("새 시험을 구성하세요. 실제 통신은 직접 송신 블록을 사용합니다.")
+
+    def refresh_mode(self):
+        self.mode_chip.setText(self.window.transport.label)
+        self.run_button.setText('실제 실행' if self.window.transport.live else '모의 실행')
+        self.status.setText(f'{self.window.transport.label} · 연결과 송신 데이터를 확인하세요.')
 
     def mark_dirty(self, *args):
         if self.loading:
@@ -210,6 +217,8 @@ class ScenarioEditor(QWidget):
             return f"↻  {step.count}회 반복\n내부 활동을 순서대로 반복"
         if step.kind == "wait":
             return f"◷  시간 대기\n{step.milliseconds:,} ms"
+        if step.kind == 'raw':
+            return f'직접 송신 · {step.wire_format.upper()}\n{step.connection_id} | {step.wire_data[:24]!r}'
         message = self.window.messages[step.message]
         return f"ICD 메시지 송신 · {message.description}\nopcode {message.cmd}  |  {step.connection_id}"
 
@@ -262,7 +271,7 @@ class ScenarioEditor(QWidget):
             return
         kind, name = item.data(ROLE)
         step = Step.send(name, self.window.messages) if kind == "send" else Step(kind)
-        if kind == "send":
+        if kind in ("send", 'raw'):
             connection = self.window.selected_connection()
             step.connection_id = connection.identifier
             current = self.window.current_socket()
@@ -357,9 +366,10 @@ class ScenarioEditor(QWidget):
             spin.valueChanged.connect(lambda value: self.set_property(step, key, value))
             self.form.addRow("반복 횟수" if step.kind == "repeat" else "대기 시간", spin)
             return
-        message = self.window.messages[step.message]
-        self.form.addRow(label(message.description, "heading"))
-        self.form.addRow(label(f"opcode {message.cmd}", "muted"))
+        message = None if step.kind == 'raw' else self.window.messages[step.message]
+        self.form.addRow(label('바이트 직접 송신' if message is None else message.description, "heading"))
+        if message is not None:
+            self.form.addRow(label(f"opcode {message.cmd}", "muted"))
         target = QComboBox()
         target.setMinimumContentsLength(12)
         target.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
@@ -384,11 +394,25 @@ class ScenarioEditor(QWidget):
         self.form.addRow("송신 대상", target)
         try:
             socket, peer = self.window.transport.resolve(step.connection_id, step.socket_id)
-            endpoint = label(f"모의 연결 · {socket.identifier}\nLocal {socket.local_endpoint}\n대상 {peer}", "caption")
+            endpoint = label(f"{self.window.transport.label} · {socket.identifier}\nLocal {socket.local_endpoint}\n대상 {peer}", "caption")
         except ValueError:
-            endpoint = label("미연결 / 대상 미선택\nICD 송수신 화면에서 모의 연결하세요.", "caption")
+            endpoint = label("미연결 / 대상 미선택\nICD 송수신 화면에서 연결하세요.", "caption")
         endpoint.setWordWrap(True)
         self.form.addRow(endpoint)
+        if step.kind == 'raw':
+            kind = QComboBox()
+            kind.addItem('HEX', 'hex'); kind.addItem('UTF-8', 'utf8')
+            kind.setCurrentIndex(0 if step.wire_format == 'hex' else 1)
+            kind.currentIndexChanged.connect(lambda _: self.set_property(step, 'wire_format', kind.currentData()))
+            data = QPlainTextEdit(step.wire_data)
+            data.setMaximumHeight(180)
+            data.textChanged.connect(lambda: self.set_property(step, 'wire_data', data.toPlainText()))
+            self.form.addRow('송신 형식', kind)
+            self.form.addRow('송신 내용', data)
+            note = label('입력한 바이트 그대로 송신합니다.\nHEX 예: AA BB 0D 0A\nUTF-8은 줄바꿈도 그대로 포함합니다.', 'caption')
+            note.setWordWrap(True)
+            self.form.addRow(note)
+            return
         if not isinstance(message, IcdMessage):
             for key in ("src", "dst", "cmd"):
                 edit = QLineEdit(step.headers[key])
@@ -478,7 +502,7 @@ class ScenarioEditor(QWidget):
         self.stop_button.setEnabled(running)
 
     def on_status(self, message):
-        self.status.setText(f"MOCK · {message}")
+        self.status.setText(f"{self.window.transport.label} · {message}")
 
     def on_progress(self, identifier, current, total):
         def find(parent):
@@ -494,9 +518,9 @@ class ScenarioEditor(QWidget):
         if item:
             self.tree.setCurrentItem(item)
             self.tree.scrollToItem(item)
-        self.status.setText(f"MOCK · 실행 중 {current}/{total} · {item.text(0).splitlines()[0] if item else ''}")
+        self.status.setText(f"{self.window.transport.label} · 실행 중 {current}/{total} · {item.text(0).splitlines()[0] if item else ''}")
 
     def on_finished(self, status):
         self.set_running(False)
         if status == "완료":
-            self.status.setText(f"MOCK · 완료 · {self.runner.completed}개 활동 수행 (실제 장비 판정 아님)")
+            self.status.setText(f"{self.window.transport.label} · 완료 · {self.runner.completed}개 활동 수행 (상대 수신·실제 장비 판정 아님)")

@@ -11,6 +11,7 @@ from uuid import uuid4
 
 from .preview_data import MESSAGES
 from .icd import IcdMessage, catalog_payload, catalog_from_payload
+from .wire import encode_raw
 
 CATALOG_VERSION = "sample-1"
 MAX_ACTIONS = 10000
@@ -92,6 +93,8 @@ class Step:
     count: int = 10
     milliseconds: int = 500
     children: list = field(default_factory=list)
+    wire_format: str = 'hex'
+    wire_data: str = ''
 
     @classmethod
     def send(cls, name="SET_FREQUENCY", catalog=None):
@@ -118,7 +121,7 @@ class Scenario:
                 raise ValueError("반복 중첩은 8단계까지 지원합니다.")
             total = 0
             for step in steps:
-                if not isinstance(step, Step) or step.kind not in ("send", "wait", "repeat"):
+                if not isinstance(step, Step) or step.kind not in ("send", "raw", "wait", "repeat"):
                     raise ValueError("지원하지 않는 블록입니다.")
                 if not isinstance(step.id, str) or not step.id or step.id in ids:
                     raise ValueError("블록 ID가 비어 있거나 중복됩니다.")
@@ -140,7 +143,10 @@ class Scenario:
                 else:
                     if not isinstance(step.connection_id, str) or not step.connection_id or not isinstance(step.socket_id, str):
                         raise ValueError("송신 대상을 선택하세요.")
-                    validate_message(step.message, step.headers, step.values, self.catalog)
+                    if step.kind == 'raw':
+                        encode_raw(step.wire_format, step.wire_data)
+                    else:
+                        validate_message(step.message, step.headers, step.values, self.catalog)
                     total += 1
                 if total > MAX_ACTIONS:
                     raise ValueError(f"시험당 최대 {MAX_ACTIONS:,}개 활동을 지원합니다.")
@@ -150,15 +156,22 @@ class Scenario:
 
     def to_dict(self):
         self.validate()
-        return {"format": "ds-scenario", "version": 1 if self.catalog is None else 2, "catalog": CATALOG_VERSION if self.catalog is None else catalog_payload(self.catalog), "name": self.name, "steps": [asdict(step) for step in self.steps]}
+        version = 3 if any(step.kind == 'raw' for step in iter_actions_once(self.steps)) else (1 if self.catalog is None else 2)
+        def serialize(step):
+            data = asdict(step)
+            if step.kind != 'raw':
+                data.pop('wire_format'); data.pop('wire_data')
+            data['children'] = [serialize(child) for child in step.children]
+            return data
+        return {"format": "ds-scenario", "version": version, "catalog": CATALOG_VERSION if self.catalog is None else catalog_payload(self.catalog), "name": self.name, "steps": [serialize(step) for step in self.steps]}
 
     @classmethod
     def from_dict(cls, data):
         if not isinstance(data, dict) or data.get("format") != "ds-scenario" or type(data.get("version")) is not int:
             raise ValueError("지원하는 시나리오 파일이 아닙니다.")
-        if data['version'] == 1 and data.get('catalog') == CATALOG_VERSION:
+        if data['version'] in (1, 3) and data.get('catalog') == CATALOG_VERSION:
             catalog = None
-        elif data['version'] == 2:
+        elif data['version'] in (2, 3):
             catalog = catalog_from_payload(data.get('catalog'))
         else:
             raise ValueError("시나리오 버전 또는 ICD 정의를 확인하세요.")
@@ -176,6 +189,8 @@ class Scenario:
                 values = dict(item)
                 if "id" not in values or "kind" not in values:
                     raise ValueError("블록 ID와 종류가 필요합니다.")
+                if values['kind'] == 'raw' and data['version'] != 3:
+                    raise ValueError('직접 송신 블록은 시나리오 version 3이 필요합니다.')
                 values["children"] = parse(values.get("children", []), depth + 1)
                 try:
                     result.append(Step(**values))
@@ -189,6 +204,12 @@ class Scenario:
         except (KeyError, TypeError, AttributeError, RecursionError):
             raise ValueError("시나리오 파일 구조가 올바르지 않습니다.") from None
         return scenario
+
+
+def iter_actions_once(steps):
+    for step in steps:
+        yield step
+        yield from iter_actions_once(step.children)
 
 
 def iter_actions(steps):
