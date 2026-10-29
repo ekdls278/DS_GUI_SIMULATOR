@@ -2,12 +2,12 @@
 
 **조작 가능한 기본 프로토타입:** [prototype/README.md](prototype/README.md)
 
-블록 편집·모의 실행·저장 기능이 추가된 버전은 `prototype/`에 있습니다.
+블록 편집·모의 실행·실시간 통신 모니터·전용 로그·스펙트럼 독립 창이 추가된 버전은 `prototype/`에 있습니다.
 **[실행 파일 ZIP 다운로드 — 저장소에 포함](https://github.com/ekdls278/DS_GUI_SIMULATOR/raw/refs/heads/main/prototype/DS-Simulator-Windows-x64.zip)**
 
 ZIP에는 단독 실행 가능한 `DS-Simulator.exe` 하나만 들어 있습니다. 압축을 풀고 EXE를 더블클릭하세요.
 
-**[Windows 단일 실행 파일 다운로드 — EXE](https://github.com/ekdls278/DS_GUI_SIMULATOR/releases/download/prototype-windows-40699081481-1/DS-Simulator.exe)** · [릴리즈 상세](https://github.com/ekdls278/DS_GUI_SIMULATOR/releases/tag/prototype-windows-40699081481-1)
+**[Windows 단일 실행 파일 다운로드 — EXE](https://github.com/ekdls278/DS_GUI_SIMULATOR/releases/download/prototype-windows-40803068923-1/DS-Simulator.exe)** · [릴리즈 상세](https://github.com/ekdls278/DS_GUI_SIMULATOR/releases/tag/prototype-windows-40803068923-1)
 `DS-Simulator.exe` 파일 하나만 다운로드하여 더블클릭하세요.
 소스로 실행하려면 `prototype/run-windows.cmd`를 사용하세요. 아래 내용은 기존 GUI 시안 안내입니다.
 
