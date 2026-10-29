@@ -40,7 +40,7 @@ class WorkspaceMixin:
         panels.addWidget(self.make_message_catalog(), 26)
         panels.addWidget(self.make_composer(), 45)
         layout.addLayout(panels, 3)
-        layout.addWidget(self.make_log(), 2)
+        layout.addWidget(self.make_traffic_monitor(), 2)
         return page
 
     def make_connections(self):

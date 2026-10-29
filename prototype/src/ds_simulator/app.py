@@ -25,7 +25,7 @@ from .profiles import ProfileMixin
 
 from .preview_data import CONNECTIONS, MESSAGES, SOCKETS, ConnectionPreview
 
-PAGE_NAMES = ("workspace", "sockets", "icd", "spectrum", "scenario")
+PAGE_NAMES = ("workspace", "sockets", "icd", "spectrum", "scenario", "logs")
 
 
 def combo(values: list[str]) -> QComboBox:
@@ -56,6 +56,10 @@ class SimulatorWindow(WorkspaceMixin, ActivityMixin, ProfileMixin, QMainWindow):
         self.connection_buttons = {}
         self.selected_peers = {}
         self.transport = MockTransport(lambda: self.connections, lambda: self.sockets, self)
+        self.initialize_activity()
+        self.spectrum_window = None
+        self.active_page = 0
+        self.page_indices = {}
         root = QWidget()
         root.setObjectName("root")
         layout = QVBoxLayout(root)
@@ -67,12 +71,12 @@ class SimulatorWindow(WorkspaceMixin, ActivityMixin, ProfileMixin, QMainWindow):
         body.setSpacing(0)
         self.stack = QStackedWidget()
         body.addWidget(self.make_sidebar())
-        for page in (self.make_workspace(), self.make_sockets_page(), self.make_icd_page(), self.make_spectrum_page(), self.make_scenario_page()):
+        for navigation_id, page in ((0, self.make_workspace()), (1, self.make_sockets_page()), (2, self.make_icd_page()), (4, self.make_scenario_page()), (5, self.make_log_page())):
             scroll = QScrollArea()
             scroll.setWidgetResizable(True)
             scroll.setFrameShape(QFrame.Shape.NoFrame)
             scroll.setWidget(page)
-            self.stack.addWidget(scroll)
+            self.page_indices[navigation_id] = self.stack.addWidget(scroll)
         body.addWidget(self.stack, 1)
         layout.addLayout(body, 1)
         self.setCentralWidget(root)
@@ -124,11 +128,11 @@ class SimulatorWindow(WorkspaceMixin, ActivityMixin, ProfileMixin, QMainWindow):
         self.nav_group = QButtonGroup(self)
         for index, (text, glyph) in enumerate((
             ("ICD 송수신", "grid"), ("소켓 상세", "link"), ("ICD 정의", "file"), ("스펙트럼", "wave"),
-            ("시나리오", "folder"),
+            ("시나리오", "folder"), ("송수신 로그", "file"),
         )):
             nav = button(text, icon_name=glyph)
             nav.setObjectName("nav")
-            nav.setCheckable(True)
+            nav.setCheckable(index != 3)
             nav.setIconSize(QSize(18, 18))
             nav.setChecked(index == 0)
             self.nav_group.addButton(nav, index)
@@ -186,15 +190,48 @@ class SimulatorWindow(WorkspaceMixin, ActivityMixin, ProfileMixin, QMainWindow):
     def closeEvent(self, event):
         self.scenario_editor.runner.stop()
         if self.scenario_editor.confirm_discard():
+            if self.spectrum_window is not None:
+                self.spectrum_window.close()
+            self.traffic_monitor.timer.stop()
+            self.log_refresh_timer.stop()
             event.accept()
         else:
             event.ignore()
 
     def show_page(self, index: int):
-        self.stack.setCurrentIndex(index)
+        if index == 3:
+            self.open_spectrum()
+            return
+        self.stack.setCurrentIndex(self.page_indices[index])
+        self.active_page = index
         self.nav_group.button(index).setChecked(True)
         if index == 4:
             self.scenario_editor.show_properties()
+        elif index == 5:
+            self.flush_log_view()
+
+    def open_spectrum(self):
+        if self.spectrum_window is None:
+            self.spectrum_window = QDialog(self, Qt.WindowType.Window)
+            self.spectrum_window.setWindowTitle('스펙트럼 · 정적 예시')
+            self.spectrum_window.setModal(False)
+            self.spectrum_window.resize(1150, 850)
+            self.spectrum_window.setMinimumSize(850, 620)
+            layout = QVBoxLayout(self.spectrum_window)
+            layout.setContentsMargins(0, 0, 0, 0)
+            scroll = QScrollArea()
+            scroll.setWidgetResizable(True)
+            scroll.setFrameShape(QFrame.Shape.NoFrame)
+            spectrum = self.make_spectrum_page()
+            spectrum.setMinimumWidth(810)
+            scroll.setWidget(spectrum)
+            layout.addWidget(scroll)
+        if self.spectrum_window.isMinimized():
+            self.spectrum_window.showNormal()
+        else:
+            self.spectrum_window.show()
+        self.spectrum_window.raise_()
+        self.spectrum_window.activateWindow()
 
     def make_sockets_page(self) -> QWidget:
         page, layout = self.page("소켓 현황", "앱에서 관리하는 소켓의 상태와 Local / Remote 주소를 확인합니다. 현재 값은 모두 예시입니다.")
@@ -600,6 +637,7 @@ class SimulatorWindow(WorkspaceMixin, ActivityMixin, ProfileMixin, QMainWindow):
         self.connection_summary.setText(f"프로파일 {len(self.connections):02}개  ·  TCP {tcp_count} / UDP {len(self.connections) - tcp_count}")
         self.sidebar_connections.setText(f"      연결 프로파일       {len(self.connections):02}")
         self.select_connection(index)
+        self.traffic_monitor.set_connections(self.connections)
 
 
 def main() -> int:
@@ -626,7 +664,8 @@ def main() -> int:
     if args.screenshot:
         def capture():
             args.screenshot.parent.mkdir(parents=True, exist_ok=True)
-            ok = window.grab().save(str(args.screenshot))
+            target = window.spectrum_window if args.page == "spectrum" else window
+            ok = target.grab().save(str(args.screenshot))
             window.close()
             app.exit(0 if ok else 1)
         QTimer.singleShot(350, capture)

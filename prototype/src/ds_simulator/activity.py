@@ -4,16 +4,34 @@ import csv
 import io
 import json
 
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QComboBox, QFileDialog, QLineEdit, QMessageBox, QPlainTextEdit, QTableWidgetItem
 
 from .domain import Step, save_json
+from .traffic import TrafficHistory
+from .traffic_monitor import TrafficMonitor, public_record
 from .widgets import Card, button, chip, label, row, table
 
 
 class ActivityMixin:
-    def make_log(self):
+    def initialize_activity(self):
         self.log_events = []
+        self.traffic_history = TrafficHistory()
+        self.log_dirty = False
+        self.last_log_rendered = 0
+        self.transport.sent.connect(self.record_event)
+
+    def make_traffic_monitor(self):
+        self.traffic_monitor = TrafficMonitor(self.traffic_history, self.connections, lambda: self.show_page(5), self.mock_receive)
+        return self.traffic_monitor
+
+    def make_log_page(self):
+        page, layout = self.page("송수신 로그", "최근 2,000건을 검색·필터링하고, 상세값을 확인하거나 파일로 저장합니다.")
+        layout.addWidget(self.make_log(), 1)
+        return page
+
+    def make_log(self):
         card = Card()
         self.log_count = chip("MOCK · 0건", "neutralChip")
         header = row(label("송수신 로그", "heading"), self.log_count)
@@ -42,15 +60,19 @@ class ActivityMixin:
         header.addWidget(export)
         card.body.addLayout(header)
         self.log_table = table(["시간", "방향", "연결 ID", "상대 IP : Port", "SRC", "DST", "CMD", "메시지 / 출처"], [])
-        self.log_table.setMinimumHeight(140)
+        self.log_table.setMinimumHeight(420)
         self.log_table.itemSelectionChanged.connect(self.show_log_detail)
         card.body.addWidget(self.log_table, 1)
         self.log_detail = QPlainTextEdit()
         self.log_detail.setReadOnly(True)
-        self.log_detail.setMaximumHeight(82)
+        self.log_detail.setMinimumHeight(170)
+        self.log_detail.setMaximumHeight(280)
         self.log_detail.setPlaceholderText("로그 행을 선택하면 모의 데이터와 입력값을 확인할 수 있습니다. 최대 2,000건을 유지합니다.")
         card.body.addWidget(self.log_detail)
-        self.transport.sent.connect(self.record_event)
+        self.log_refresh_timer = QTimer(self)
+        self.log_refresh_timer.setInterval(100)
+        self.log_refresh_timer.timeout.connect(lambda: self.flush_log_view() if self.log_table.isVisible() else None)
+        self.log_refresh_timer.start()
         return card
 
     @staticmethod
@@ -59,36 +81,73 @@ class ActivityMixin:
         return [event["time"], event["direction"], event["connection_id"], event["peer"], headers["src"], headers["dst"], headers["cmd"], f"{event['message']} · {event['source']} · MOCK"]
 
     def record_event(self, event):
-        self.log_events.insert(0, event)
+        enriched = dict(event)
+        connection = next((c for c in self.connections if c.identifier == event['connection_id']), None)
+        enriched['connection_mode'] = connection.mode if connection else event.get('connection_mode', 'unknown')
+        record = self.traffic_history.append(enriched)
+        self.log_events.insert(0, record)
         if len(self.log_events) > 2000:
             self.log_events.pop()
+        self.log_dirty = True
+
+    def flush_log_view(self):
+        if not self.log_dirty:
+            return
+        selected = None
+        if self.log_table.selectionModel().hasSelection():
+            item = self.log_table.item(self.log_table.currentRow(), 0)
+            selected = item.data(Qt.ItemDataRole.UserRole) if item else None
         self.log_table.blockSignals(True)
-        self.log_table.insertRow(0)
-        for column, value in enumerate(self.log_row(event)):
-            self.log_table.setItem(0, column, QTableWidgetItem(value))
-        self.log_table.item(0, 1).setForeground(QColor("#3264e8" if event["direction"] == "TX" else "#15996e"))
-        if self.log_table.rowCount() > 2000:
-            self.log_table.removeRow(2000)
-        self.log_table.clearSelection()
-        self.log_table.blockSignals(False)
-        self.log_detail.clear()
-        self.log_count.setText(f"MOCK · {len(self.log_events):,}건")
-        self.filter_log()
+        self.log_table.setUpdatesEnabled(False)
+        try:
+            fresh = [r for r in self.log_events if r['event_id'] > self.last_log_rendered]
+            for event in reversed(fresh):
+                self.log_table.insertRow(0)
+                for column, value in enumerate(self.log_row(event)):
+                    item = QTableWidgetItem(value)
+                    if column == 0:
+                        item.setData(Qt.ItemDataRole.UserRole, event['event_id'])
+                    self.log_table.setItem(0, column, item)
+                self.log_table.item(0, 1).setForeground(QColor('#3264e8' if event['direction'] == 'TX' else '#15996e'))
+            self.log_table.setRowCount(len(self.log_events))
+            self.log_table.clearSelection()
+            self.log_table.setCurrentCell(-1, -1)
+            if selected is not None:
+                index = next((i for i, r in enumerate(self.log_events) if r['event_id'] == selected), None)
+                if index is not None:
+                    self.log_table.selectRow(index)
+            self.last_log_rendered = self.traffic_history.received
+            self.log_dirty = False
+        finally:
+            self.log_table.setUpdatesEnabled(True)
+            self.log_table.blockSignals(False)
+        self.log_count.setText(f'MOCK · 최근 {len(self.log_events):,}건')
+        self._apply_log_filter()
 
     def filter_log(self, *args):
+        self.flush_log_view()
+        self._apply_log_filter()
+
+    def _apply_log_filter(self):
         direction = self.log_direction.currentData()
         connection_id = self.log_connection_filter.currentData()
         term = self.log_search.text().casefold()
+        visible = 0
         for index, event in enumerate(self.log_events):
             hidden = (direction is not None and direction != event["direction"]) or (connection_id is not None and connection_id != event["connection_id"]) or term not in json.dumps(event, ensure_ascii=False).casefold()
             self.log_table.setRowHidden(index, hidden)
+            visible += not hidden
+        self.log_count.setText(f'MOCK · 표시 {visible:,} / 보관 {len(self.log_events):,}건')
         self.show_log_detail()
 
     def show_log_detail(self):
         index = self.log_table.currentRow()
         selected = self.log_table.selectionModel().hasSelection()
-        if selected and 0 <= index < len(self.log_events) and not self.log_table.isRowHidden(index):
-            self.log_detail.setPlainText(json.dumps(self.log_events[index], ensure_ascii=False, indent=2))
+        item = self.log_table.item(index, 0) if index >= 0 else None
+        identifier = item.data(Qt.ItemDataRole.UserRole) if item else None
+        record = next((r for r in self.log_events if r['event_id'] == identifier), None)
+        if selected and record is not None and not self.log_table.isRowHidden(index):
+            self.log_detail.setPlainText(json.dumps(public_record(record), ensure_ascii=False, indent=2))
         else:
             self.log_detail.clear()
 
@@ -107,7 +166,8 @@ class ActivityMixin:
         self.record_event({"time": datetime.now().astimezone().isoformat(timespec="milliseconds"), "mode": "MOCK", "direction": "RX", "source": "수신 예시 버튼", "connection_id": connection.identifier, "socket_id": socket.identifier, "peer": peer, "message": step.message, "headers": step.headers, "values": validate_message(step.message, step.headers, step.values), "big_endian": False})
 
     def visible_events(self):
-        return [event for index, event in enumerate(self.log_events) if not self.log_table.isRowHidden(index)]
+        self.flush_log_view()
+        return [public_record(event) for index, event in enumerate(self.log_events) if not self.log_table.isRowHidden(index)]
 
     def export_log(self):
         filename, selected = QFileDialog.getSaveFileName(self, "현재 필터의 모의 로그 저장", "mock-log.json", "JSON (*.json);;CSV (*.csv)")

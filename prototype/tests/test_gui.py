@@ -202,6 +202,105 @@ class GuiTests(unittest.TestCase):
         self.assertEqual(self.window.connection_list.count(), 5)  # four cards and stretch
         self.assertEqual(self.window.connection_cards['SRV-01'].root.childCount(), 0)
 
+    def test_spectrum_popup_is_nonmodal_singleton_and_does_not_navigate(self):
+        current = self.window.stack.currentIndex()
+        QTest.mouseClick(self.window.nav_group.button(3), Qt.MouseButton.LeftButton)
+        popup = self.window.spectrum_window
+        self.assertTrue(popup.isVisible())
+        self.assertFalse(popup.isModal())
+        self.assertEqual(self.window.stack.currentIndex(), current)
+        self.assertEqual(self.window.nav_group.checkedId(), 0)
+        from PySide6.QtWidgets import QCheckBox
+        hold = popup.findChild(QCheckBox)
+        hold.setChecked(False)
+        self.window.show_page(5)
+        self.assertTrue(popup.isVisible())
+        popup.close()
+        self.window.show_page(3)
+        self.assertIs(self.window.spectrum_window, popup)
+        self.assertFalse(hold.isChecked())
+        self.window.close()
+        self.assertFalse(popup.isVisible())
+
+    def test_dedicated_log_page_preserves_selected_details_as_messages_arrive(self):
+        self.connect_first()
+        self.window.preview_send()
+        self.assertFalse(self.window.stack.currentWidget().isAncestorOf(self.window.log_table))
+        self.window.show_page(5)
+        self.assertTrue(self.window.stack.currentWidget().isAncestorOf(self.window.log_table))
+        self.assertEqual(self.window.log_table.rowCount(), 1)
+        self.window.log_table.selectRow(0)
+        selected_id = self.window.log_events[0]['event_id']
+        self.window.mock_receive()
+        self.window.show_log_detail()  # Arrivals must not shift details before the batched redraw.
+        self.assertEqual(json.loads(self.window.log_detail.toPlainText())['event_id'], selected_id)
+        self.window.flush_log_view()
+        self.assertEqual(self.window.log_table.currentRow(), 1)
+        self.assertEqual(json.loads(self.window.log_detail.toPlainText())['event_id'], selected_id)
+
+    def test_monitor_pause_freezes_display_but_log_collection_continues(self):
+        self.connect_first()
+        self.window.preview_send()
+        monitor = self.window.traffic_monitor
+        monitor.render_now()
+        QTest.mouseClick(monitor.pause_button, Qt.MouseButton.LeftButton)
+        snapshot = monitor.paused_snapshot
+        self.window.mock_receive()
+        monitor.render_now()
+        self.assertEqual(len(monitor.canvas.records), 1)
+        self.assertEqual(snapshot.stats()['RX'], 0)
+        self.assertEqual(len(self.window.log_events), 2)
+        self.window.flush_log_view()
+        self.assertEqual(self.window.log_table.rowCount(), 2)
+        QTest.mouseClick(monitor.pause_button, Qt.MouseButton.LeftButton)
+        self.assertIsNone(monitor.paused_snapshot)
+        self.assertEqual(len(monitor.canvas.records), 2)
+
+    def test_timeline_click_exposes_actual_message_values(self):
+        self.connect_first()
+        self.window.payload_inputs['channel'].setText('3')
+        self.window.preview_send()
+        monitor = self.window.traffic_monitor
+        monitor.render_now()
+        monitor.canvas.grab()  # Force a layout/paint even if the parent scroll area clips it.
+        self.assertTrue(monitor.canvas.hits)
+        rect, records = monitor.canvas.hits[0]
+        QTest.mouseClick(monitor.canvas, Qt.MouseButton.LeftButton, pos=rect.center().toPoint())
+        shown = json.loads(monitor.detail.toPlainText())
+        self.assertEqual(shown['events'][0]['values']['channel'], 3)
+        self.assertEqual(shown['events'][0]['mode'], 'MOCK')
+        self.assertFalse(any(key.startswith('_') for key in shown['events'][0]))
+
+    def test_monitor_filter_zoom_and_history_controls(self):
+        self.connect_first()
+        self.window.preview_send()
+        self.window.select_connection(1)
+        self.window.message_catalog.setCurrentRow(0)
+        self.window.preview_send()
+        monitor = self.window.traffic_monitor
+        monitor.connection_filter.setCurrentIndex(monitor.connection_filter.findData('TCP-01'))
+        self.assertEqual(monitor.canvas.lanes, [('TCP-01', '')])
+        monitor.span.setCurrentIndex(0)
+        self.assertAlmostEqual(monitor.canvas.end - monitor.canvas.start, 5)
+        monitor.follow.setChecked(False)
+        monitor.offset.setValue(120)
+        self.assertEqual(monitor.canvas.lanes, [])
+        monitor.follow.setChecked(True)
+        self.assertEqual(monitor.canvas.lanes, [('TCP-01', '')])
+
+    def test_log_buffer_overflow_keeps_counters_and_clears_evicted_selection(self):
+        self.connect_first()
+        self.window.preview_send()
+        self.window.show_page(5)
+        self.window.log_table.selectRow(0)
+        original = dict(self.window.log_events[0])
+        for _ in range(2001):
+            self.window.record_event(original)
+        self.window.flush_log_view()
+        self.assertEqual(self.window.log_table.rowCount(), 2000)
+        self.assertFalse(self.window.log_table.selectionModel().hasSelection())
+        self.assertEqual(self.window.traffic_history.snapshot().stats()['TX'], 2002)
+
     def test_manual_send_validation_and_actual_values_in_log(self):
         self.connect_first()
         self.window.payload_inputs['channel'].setText('256')

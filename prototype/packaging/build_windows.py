@@ -73,7 +73,7 @@ def main():
         # Copy ONLY the EXE to a fresh directory: an onedir executable would fail here.
         standalone = Path(directory) / executable.name
         shutil.copy2(executable, standalone)
-        for page in ('workspace', 'scenario'):
+        for page in ('workspace', 'scenario', 'logs', 'spectrum'):
             screenshot = Path(directory) / f'{page}.png'
             subprocess.run(
                 [str(standalone), '--page', page, '--screenshot', str(screenshot)],

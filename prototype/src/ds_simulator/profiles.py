@@ -84,6 +84,7 @@ class ProfileMixin:
         self.select_connection(0)
         self.filter_log()
         self.scenario_editor.show_properties()
+        self.traffic_monitor.set_connections(self.connections)
 
     def save_profiles_dialog(self):
         filename, _ = QFileDialog.getSaveFileName(self, "연결 설정 저장", "connections.json", "연결 설정 JSON (*.json)")
