@@ -21,7 +21,7 @@
 
 ## Windows 패키징
 
-`.github/workflows/windows-executable.yml`은 Windows x64에서 55개 테스트를 실행하고
+`.github/workflows/windows-executable.yml`은 Windows x64에서 61개 테스트를 실행하고
 `packaging/build_windows.py`로 PyInstaller onefile EXE를 만듭니다. EXE 파일 하나만 새 임시 폴더에 복사하여
 workspace/scenario/logs/spectrum/excel-import PNG 생성을 확인한 뒤 EXE·SHA-256을 GitHub prerelease에 올립니다.
 Python 설치, 압축 해제, 추가 폴더 없이 EXE 하나로 실행합니다.
@@ -60,7 +60,11 @@ Python 설치, 압축 해제, 추가 폴더 없이 EXE 하나로 실행합니다
 A=opcode, B=연동자료명, C=순번, D=데이터 요소, E=공백 구분 선택값입니다.
 같은 메시지의 빈 A/B와 병합 셀을 이어 읽고, 새 opcode의 이름이 없으면 잘못 이어 붙이지 않고 행 번호를 안내합니다.
 데이터 타입·바이트 길이·선택값의 숫자 의미를 추정하지 않습니다. E가 비면 자유 텍스트입니다.
-수식은 실행하지 않습니다. 실제 회사 데이터가 아닌 `examples/example-icd.xlsx`만 테스트/배포에 사용합니다.
+수식은 실행하지 않고 formula/data-only read-only 뷰를 나란히 읽어 Excel이 저장한 계산 결과를 사용합니다.
+계산 결과가 없는 수식은 빈칸처럼 이어 붙이지 않고 재계산·저장을 안내합니다. Excel 오류 값도 거부합니다.
+문자열 빈 결과와 캐시 없는 수식을 구별하고 숫자 0 및 zero padding을 보존합니다.
+캐시의 최신 여부는 확인할 수 없으므로 최신 값은 Excel에서 재계산·저장해야 합니다.
+실제 회사 데이터가 아닌 가상 워크북만 테스트/배포에 사용합니다. Windows frozen 검사도 가상 A2 수식의 저장된 결과를 읽습니다.
 
 활성 ICD는 `window.messages`에만 보관하며 전역 MESSAGES를 수정하지 않습니다.
 `IcdMixin.apply_catalog()`는 수동 목록과 정의 화면을 교체하고 기본적으로 시나리오를 새 시험으로 만듭니다.
@@ -93,7 +97,7 @@ UDP IPv4 단일 페이로드 최대 65,507바이트이므로 64KiB 메시지는 
 고속 수신은 수신/해석/저장/화면 갱신 분리 및 실제 Windows 부하 시험이 필요합니다.
 
 검증: `QT_QPA_PLATFORM=offscreen uv run python -m unittest discover -s tests -v`
-55개 테스트가 있으며 Linux Qt offscreen에서 통과했습니다.
+61개 테스트가 있으며 Linux Qt offscreen에서 통과했습니다.
 현재 UI 캡처: `docs/prototype-workspace.png`, `docs/prototype-scenario.png`.
 Windows 대화형 수동 조작·실장비·10G·FFT·계측기 검증은 아직 수행하지 않았습니다.
 Windows CI에서 전체 테스트와 frozen EXE의 offscreen 실행을 검사합니다.

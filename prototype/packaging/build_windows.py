@@ -10,6 +10,8 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from xml.etree import ElementTree as ET
+from zipfile import ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 NAME = 'DS-Simulator'
@@ -91,9 +93,23 @@ def main():
         sheet = book.active
         sheet.title = '가상 장치(데이터)'
         sheet.append(['opcode', '연동자료명', '순번', '데이터 요소', '데이터 상세 값'])
-        sheet.append(['0x0001', '가상 모드 설정', 1, '운용 모드', '중지 실행 자동'])
+        sheet.append(['="0x0001"', '가상 모드 설정', 1, '운용 모드', '중지 실행 자동'])
         book.save(workbook_path)
         book.close()
+        # Synthetic fixture only: simulate Excel's saved string formula result.
+        # openpyxl writes formulas but does not calculate or cache their results.
+        with ZipFile(workbook_path) as archive:
+            entries = [(item, archive.read(item.filename)) for item in archive.infolist()]
+        with ZipFile(workbook_path, 'w') as archive:
+            for item, content in entries:
+                if item.filename == 'xl/worksheets/sheet1.xml':
+                    namespace = '{http://schemas.openxmlformats.org/spreadsheetml/2006/main}'
+                    root = ET.fromstring(content)
+                    cell = next(c for c in root.iter(namespace + 'c') if c.attrib['r'] == 'A2')
+                    cell.set('t', 'str')
+                    cell.find(namespace + 'v').text = '0x0001'
+                    content = ET.tostring(root, encoding='utf-8')
+                archive.writestr(item, content)
         screenshot = Path(directory) / 'excel-import.png'
         subprocess.run([str(standalone), '--icd-excel', str(workbook_path), '--icd-sheet', sheet.title,
                         '--preview-stage', 'ready', '--screenshot', str(screenshot)],
@@ -101,7 +117,8 @@ def main():
         if not screenshot.is_file() or screenshot.stat().st_size < 1000 or screenshot.read_bytes()[:8] != b'\x89PNG\r\n\x1a\n':
             raise RuntimeError('Standalone EXE failed to import the synthetic Excel ICD.')
         shutil.copy2(screenshot, validation / screenshot.name)
-        report['frozen_smoke_checks'].append({'page': 'excel-import', 'result': 'passed', 'standalone_copy': True})
+        report['frozen_smoke_checks'].append({'page': 'excel-import', 'result': 'passed', 'standalone_copy': True,
+                                             'saved_formula_result': True})
 
     (validation / 'build-info.json').write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
     with executable.open('rb') as stream:

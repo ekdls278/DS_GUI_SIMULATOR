@@ -5,6 +5,8 @@ from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
+from xml.etree import ElementTree as ET
+from zipfile import ZipFile
 
 from openpyxl import Workbook
 
@@ -33,6 +35,27 @@ def make_workbook(path):
     book.create_sheet('이전(데이터) 백업').append(['불러오지 않습니다'])
     book.save(path)
     book.close()
+
+
+def set_formula_caches(path, values):
+    """Simulate results saved by Excel; openpyxl itself never calculates formulas."""
+    namespace = '{http://schemas.openxmlformats.org/spreadsheetml/2006/main}'
+    with ZipFile(path) as archive:
+        entries = [(item, archive.read(item.filename)) for item in archive.infolist()]
+    with ZipFile(path, 'w') as archive:
+        for item, content in entries:
+            if item.filename == 'xl/worksheets/sheet1.xml':
+                root = ET.fromstring(content)
+                for cell in root.iter(namespace + 'c'):
+                    if cell.attrib['r'] in values:
+                        kind, value = values[cell.attrib['r']]
+                        cell.set('t', kind)
+                        result = cell.find(namespace + 'v')
+                        if result is None:
+                            result = ET.SubElement(cell, namespace + 'v')
+                        result.text = str(value)
+                content = ET.tostring(root, encoding='utf-8')
+            archive.writestr(item, content)
 
 
 class IcdReaderTests(unittest.TestCase):
@@ -87,6 +110,60 @@ class IcdReaderTests(unittest.TestCase):
         self.assertEqual(len(read_icd_sheet(self.path, sheet.title)), 1)
         sheet['E2'] = '=1+1'; book.save(self.path); book.close()
         with self.assertRaisesRegex(ValueError, 'E2'):
+            read_icd_sheet(self.path, sheet.title)
+
+    def test_formula_results_in_all_imported_columns_use_saved_values_and_preserve_original_file(self):
+        book = Workbook(); sheet = book.active; sheet.title = '수식(데이터)'
+        sheet.append(['header'] * 5)
+        sheet.append(['="0x00A1"', '="가상 설정"', '=1+0', '="운용 모드"', '="OFF ON AUTO"'])
+        book.save(self.path); book.close()
+        set_formula_caches(self.path, {'A2': ('str', '0x00A1'), 'B2': ('str', '가상 설정'),
+                                      'C2': ('n', 1), 'D2': ('str', '운용 모드'), 'E2': ('str', 'OFF ON AUTO')})
+        before = self.path.read_bytes()
+        message = next(iter(read_icd_sheet(self.path, sheet.title).values()))
+        self.assertEqual((message.opcode, message.description), ('0x00A1', '가상 설정'))
+        self.assertEqual(message.elements[0].sequence, '1')
+        self.assertEqual(message.elements[0].name, '운용 모드')
+        self.assertEqual(message.elements[0].choices, ('OFF', 'ON', 'AUTO'))
+        self.assertEqual(self.path.read_bytes(), before)
+
+    def test_formula_numeric_zero_and_format_are_preserved_and_blank_result_can_continue_message(self):
+        book = Workbook(); sheet = book.active; sheet.title = '수식(데이터)'
+        sheet.append(['header'] * 5)
+        sheet.append(['=0+0', '가상 메시지', 1, '선택', '0 1'])
+        sheet['A2'].number_format = '0000'
+        sheet.append(['=""', '=""', 2, '설명', '=""'])
+        book.save(self.path); book.close()
+        set_formula_caches(self.path, {'A2': ('n', 0), 'A3': ('str', ''), 'B3': ('str', ''), 'E3': ('str', '')})
+        message = next(iter(read_icd_sheet(self.path, sheet.title).values()))
+        self.assertEqual(message.opcode, '0000')
+        self.assertEqual(len(message.elements), 2)
+        self.assertEqual(message.elements[1].choices, ())
+
+    def test_formula_without_saved_result_includes_recalculation_instructions(self):
+        book = Workbook(); sheet = book.active; sheet.title = '수식(데이터)'
+        sheet.append(['header'] * 5)
+        sheet.append(['=1+1', '가상 메시지', 1, '요소', 'A B'])
+        book.save(self.path); book.close()
+        with self.assertRaisesRegex(ValueError, r'A2:.*Ctrl\+Alt\+F9.*저장'):
+            read_icd_sheet(self.path, sheet.title)
+
+    def test_uncached_formula_in_continuation_row_is_not_silently_forward_filled(self):
+        book = Workbook(); sheet = book.active; sheet.title = '수식(데이터)'
+        sheet.append(['header'] * 5)
+        sheet.append(['0x0001', '가상 메시지', 1, '요소', 'A B'])
+        sheet.append(['=1+1', None, 2, '다른 요소', 'C D'])
+        book.save(self.path); book.close()
+        with self.assertRaisesRegex(ValueError, 'A3:.*계산 결과가 없습니다'):
+            read_icd_sheet(self.path, sheet.title)
+
+    def test_excel_error_results_are_reported_instead_of_used_as_opcodes(self):
+        book = Workbook(); sheet = book.active; sheet.title = '수식(데이터)'
+        sheet.append(['header'] * 5)
+        sheet.append(['=1/0', '가상 메시지', 1, '요소', 'A B'])
+        book.save(self.path); book.close()
+        set_formula_caches(self.path, {'A2': ('e', '#DIV/0!')})
+        with self.assertRaisesRegex(ValueError, r'A2:.*#DIV/0!'):
             read_icd_sheet(self.path, sheet.title)
 
     def test_duplicate_element_names_have_independent_values_and_file_is_unchanged(self):

@@ -74,6 +74,7 @@ jobs:
 
           Windows에서 전체 테스트와 EXE만 임시 폴더에 복사한 상태에서 송수신·시나리오·로그·스펙트럼 독립 창·가상 Excel ICD 가져오기 실행 검사를 통과한 빌드입니다.
           Excel ICD는 선택한 `(데이터)` 시트의 A~E열을 로컬에서 읽습니다. 실제 장비 통신·계측기 제어는 아직 구현하지 않았습니다.
+          수식 셀은 Excel이 마지막으로 계산해 저장한 결과를 읽습니다. 결과가 없으면 Excel에서 전체 재계산(Ctrl+Alt+F9) 후 저장하고 다시 가져오세요.
           EOF
           gh release create "$RELEASE_TAG" \
             release-files/DS-Simulator.exe \

@@ -49,12 +49,12 @@ def message_id(opcode, name):
     return 'icd_' + hashlib.sha256((opcode + '\0' + name).encode('utf-8')).hexdigest()
 
 
-def _book(path):
+def _book(path, *, data_only=False):
     path = Path(path)
     if path.suffix.lower() not in ('.xlsx', '.xlsm'):
         raise ValueError('Excel .xlsx 또는 .xlsm 파일을 선택하세요. .xls는 .xlsx로 저장해 사용하세요.')
     try:
-        return load_workbook(path, read_only=True, data_only=False, keep_links=False)
+        return load_workbook(path, read_only=True, data_only=data_only, keep_links=False)
     except (BadZipFile, InvalidFileException, KeyError, ValueError, ParseError, DefusedXmlException) as exc:
         raise ValueError('Excel 파일을 읽을 수 없습니다. 파일 형식을 확인하세요.') from exc
 
@@ -67,11 +67,19 @@ def data_sheet_names(path):
         book.close()
 
 
-def _cell_text(cell):
+def _cell_text(cell, cached_cell=None):
+    if cell.data_type == 'f':
+        # Excel stores the last calculated result separately from the formula.
+        # Keep the formula view to distinguish an absent cache from a blank cell.
+        if cached_cell is None or (cached_cell.value is None and cached_cell.data_type not in ('str', 's', 'inlineStr')):
+            raise ValueError(f'{cell.coordinate}: 수식의 저장된 계산 결과가 없습니다. '
+                             'Excel에서 파일을 열고 전체 재계산(Ctrl+Alt+F9) 후 저장한 다음 다시 가져오세요.')
+        cell = cached_cell
+    if cell.data_type == 'e':
+        raise ValueError(f'{cell.coordinate}: Excel 오류 값({cell.value})입니다. '
+                         'Excel에서 오류를 수정하고 재계산·저장한 다음 다시 가져오세요.')
     if cell.value is None:
         return ''
-    if cell.data_type == 'f':
-        raise ValueError(f'{cell.coordinate}: 수식 대신 계산된 값을 사용하세요. 프로그램에서 수식을 실행하지 않습니다.')
     value = cell.value
     if isinstance(value, bool):
         return str(value)
@@ -86,16 +94,22 @@ def _cell_text(cell):
 
 def read_icd_sheet(path, sheet_name):
     book = _book(path)
+    cached_book = None
     try:
         if not isinstance(sheet_name, str) or sheet_name not in {s.title for s in book.worksheets} or not sheet_name.rstrip().endswith('(데이터)'):
             raise ValueError('(데이터)로 끝나는 시트 하나를 선택하세요.')
         sheet = book[sheet_name]
         sheet.reset_dimensions()
+        cached_book = _book(path, data_only=True)
+        cached_sheet = cached_book[sheet_name]
+        cached_sheet.reset_dimensions()
         groups = {}
         nonempty_rows = 0
         opcode = name = ''
-        for row_number, cells in enumerate(sheet.iter_rows(min_row=2, max_col=5), 2):
-            a, b, sequence, element, details = [_cell_text(cell) for cell in cells]
+        rows = zip(sheet.iter_rows(min_row=2, max_col=5),
+                   cached_sheet.iter_rows(min_row=2, max_col=5), strict=True)
+        for row_number, (cells, cached_cells) in enumerate(rows, 2):
+            a, b, sequence, element, details = [_cell_text(cell, cached) for cell, cached in zip(cells, cached_cells)]
             if not any((a, b, sequence, element, details)):
                 continue
             nonempty_rows += 1
@@ -129,6 +143,8 @@ def read_icd_sheet(path, sheet_name):
     except (BadZipFile, ParseError, DefusedXmlException) as exc:
         raise ValueError('선택한 시트의 데이터를 읽을 수 없습니다. Excel 파일을 확인하세요.') from exc
     finally:
+        if cached_book is not None:
+            cached_book.close()
         book.close()
 
 

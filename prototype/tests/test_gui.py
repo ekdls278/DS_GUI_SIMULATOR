@@ -362,6 +362,26 @@ class GuiTests(unittest.TestCase):
         self.assertEqual(self.window.messages, before)
         self.assertEqual(self.window.scenario_editor.collect().to_dict(), original)
 
+    def test_excel_formula_opcode_uses_saved_result_in_list_and_mock_send(self):
+        from openpyxl import Workbook
+        from test_icd import set_formula_caches
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'formula.xlsx'
+            book = Workbook(); sheet = book.active; sheet.title = '수식(데이터)'
+            sheet.append(['opcode', '연동자료명', '순번', '데이터 요소', '상세 값'])
+            sheet.append(['="0x00A1"', '가상 수식 설정', 1, '운용 모드', 'OFF ON AUTO'])
+            book.save(path); book.close()
+            set_formula_caches(path, {'A2': ('str', '0x00A1')})
+            self.choose_excel_sheet(path)
+        self.assertEqual(self.window.message_catalog.item(0).text(), '0x00A1\n가상 수식 설정')
+        self.window.message_catalog.setCurrentRow(0)
+        self.window.payload_inputs['field_0001'].setCurrentText('ON')
+        self.window.toggle_preview_connection()
+        QTest.mouseClick(self.window.send_button, Qt.MouseButton.LeftButton)
+        record = self.window.log_events[0]
+        self.assertEqual(record['headers']['cmd'], '0x00A1')
+        self.assertEqual(record['values']['field_0001'], 'ON')
+
     def test_imported_scenario_restores_choices_and_runs_without_excel(self):
         from test_icd import make_workbook
         from ds_simulator.icd import read_icd_sheet
