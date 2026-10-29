@@ -9,7 +9,7 @@ Excel ICD 조회, 시나리오 편집·실행, 파일 저장과 공통 로그를
 
 ZIP에는 단독 실행 가능한 `DS-Simulator.exe` 하나만 들어 있습니다. 압축을 풀고 EXE를 더블클릭하세요.
 
-**[Windows 단일 실행 파일 다운로드 — EXE](https://github.com/ekdls278/DS_GUI_SIMULATOR/releases/download/prototype-windows-40821374560-1/DS-Simulator.exe)** · [릴리즈 상세](https://github.com/ekdls278/DS_GUI_SIMULATOR/releases/tag/prototype-windows-40821374560-1)
+**[Windows 단일 실행 파일 다운로드 — EXE](https://github.com/ekdls278/DS_GUI_SIMULATOR/releases/download/prototype-windows-40835850125-1/DS-Simulator.exe)** · [릴리즈 상세](https://github.com/ekdls278/DS_GUI_SIMULATOR/releases/tag/prototype-windows-40835850125-1)
 
 **`DS-Simulator.exe` 파일 하나만 다운로드하여 더블클릭하세요.**
 압축 해제, Python·VS Code 설치, CMD 파일, 추가 라이브러리 폴더가 필요하지 않습니다.
