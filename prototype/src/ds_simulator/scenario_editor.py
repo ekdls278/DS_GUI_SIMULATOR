@@ -8,13 +8,13 @@ from PySide6.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QFileDialog, QFormLayout,
     QHBoxLayout, QLineEdit, QListWidget, QListWidgetItem, QMessageBox,
     QScrollArea, QSpinBox, QStyledItemDelegate, QStyle, QTreeWidget,
-    QTreeWidgetItem, QVBoxLayout, QWidget, QPlainTextEdit,
+    QTreeWidgetItem, QVBoxLayout, QWidget, QPlainTextEdit, QDialog, QDialogButtonBox,
 )
 
 from .domain import Scenario, Step, load_scenario, save_json
 from .preview_data import MESSAGES
 from .icd import IcdMessage
-from .icd_widgets import make_field_input, connect_input
+from .icd_widgets import make_field_input, connect_input, IcdFieldTable
 from .runtime import ScenarioRunner
 from .widgets import Card, button, chip, label, row
 
@@ -413,6 +413,18 @@ class ScenarioEditor(QWidget):
             note.setWordWrap(True)
             self.form.addRow(note)
             return
+        if isinstance(message, IcdMessage):
+            note = label('C~K 원본 고정 · M열 선택값만 변경' if message.current_layout else
+                         '이전 E열 형식의 저장본 · 새 열 규칙은 Excel을 다시 가져오세요.', 'caption')
+            note.setWordWrap(True)
+            self.form.addRow(note)
+            edit = button('데이터 요소 표에서 편집')
+            edit.clicked.connect(lambda: self.edit_icd_table(step, message))
+            self.form.addRow(edit)
+            for field in message.elements:
+                value = step.values[field.key]
+                self.form.addRow(field.label, label(value or '선택값 없음', 'muted'))
+            return
         if not isinstance(message, IcdMessage):
             for key in ("src", "dst", "cmd"):
                 edit = QLineEdit(step.headers[key])
@@ -427,6 +439,27 @@ class ScenarioEditor(QWidget):
         endian.setChecked(step.big_endian)
         endian.toggled.connect(lambda value: self.set_property(step, "big_endian", value))
         self.form.addRow(endian)
+
+    def edit_icd_table(self, step, message):
+        if self.runner.running:
+            return
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f'데이터 요소 · {message.description}')
+        dialog.resize(1080, 540)
+        layout = QVBoxLayout(dialog)
+        layout.addWidget(label(f'opcode {message.cmd} · ' + ('C~K 원본 고정 · M열에서만 선택' if message.current_layout else '이전 E열 형식의 저장본'), 'heading'))
+        def changed(key, value):
+            step.values[key] = value
+            self.mark_dirty()
+        table = IcdFieldTable(message, step.values, changed, dialog)
+        layout.addWidget(table, 1)
+        actions = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        actions.button(QDialogButtonBox.StandardButton.Close).setText('닫기')
+        actions.rejected.connect(dialog.accept)
+        layout.addWidget(actions)
+        dialog.exec()
+        dialog.deleteLater()
+        self.show_properties()
 
     def confirm_discard(self):
         if not self.dirty:

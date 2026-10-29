@@ -327,13 +327,13 @@ class GuiTests(unittest.TestCase):
         free = self.window.payload_inputs['field_0002']
         self.assertIsInstance(choice, QComboBox)
         self.assertIsInstance(free, QLineEdit)
+        self.assertTrue(free.isReadOnly())
         self.assertEqual([choice.itemText(i) for i in range(choice.count())], ['LOW', 'MEDIUM', 'HIGH'])
         self.assertFalse(self.window.send_button.isEnabled())
         choice.showPopup(); APP.processEvents()
         index = choice.model().index(2, 0)
         QTest.mouseClick(choice.view().viewport(), Qt.MouseButton.LeftButton, pos=choice.view().visualRect(index).center())
         self.assertEqual(choice.currentText(), 'HIGH')
-        free.setText('사용자 직접 입력')
         self.window.toggle_preview_connection()
         self.assertTrue(self.window.send_button.isEnabled())
         QTest.mouseClick(self.window.send_button, Qt.MouseButton.LeftButton)
@@ -341,7 +341,9 @@ class GuiTests(unittest.TestCase):
         self.assertEqual(record['message'], '가상 출력 설정')
         self.assertEqual(record['headers']['cmd'], '0x0020')
         self.assertEqual(record['values']['field_0001'], 'HIGH')
-        self.assertEqual(record['values']['field_0002'], '사용자 직접 입력')
+        self.assertEqual(record['values']['field_0002'], '')
+        self.assertEqual(record['data_elements'][0]['fixed']['E'], '고정 0 1')
+        self.assertEqual(record['data_elements'][0]['fixed']['K'], '원본 유지')
         self.assertEqual(record['data_elements'][0]['name'], '출력 모드')
         self.assertEqual(self.window.definition_catalog.rowCount(), 1)
         self.assertEqual(self.window.definition_fields.rowCount(), 2)
@@ -362,14 +364,76 @@ class GuiTests(unittest.TestCase):
         self.assertEqual(self.window.messages, before)
         self.assertEqual(self.window.scenario_editor.collect().to_dict(), original)
 
+    def test_fixed_icd_table_keeps_c_d_and_m_visible_and_scrolls_rows_together(self):
+        from test_icd import HEADERS, icd_row
+        from openpyxl import Workbook
+        from ds_simulator.icd import read_icd_sheet
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'table.xlsx'
+            book = Workbook(); sheet = book.active; sheet.title = '표(데이터)'
+            sheet.append(HEADERS)
+            for i in range(30):
+                sheet.append(icd_row('0x1' if i == 0 else None, '가상 표' if i == 0 else None, i + 1, f'요소 {i + 1}', '선택 A\n선택 B'))
+            book.save(path); book.close()
+            catalog = read_icd_sheet(path, sheet.title)
+            self.window.apply_catalog(catalog, '가상 표')
+        self.window.message_catalog.setCurrentRow(0)
+        table = self.window.payload_table
+        table.setFixedHeight(240); APP.processEvents()
+        for view in (table.identity, table.details):
+            for column in range(view.columnCount()):
+                self.assertFalse(view.item(0, column).flags() & Qt.ItemFlag.ItemIsEditable)
+        before = table.details.item(0, 0).text()
+        table.details.setFocus()
+        QTest.keyClicks(table.details, 'blocked')
+        self.assertEqual(table.details.item(0, 0).text(), before)
+        left = table.identity.geometry(); right = table.settings.geometry()
+        table.details.horizontalScrollBar().setValue(table.details.horizontalScrollBar().maximum())
+        self.assertEqual(table.identity.geometry(), left)
+        self.assertEqual(table.settings.geometry(), right)
+        table.details.verticalScrollBar().setValue(150)
+        self.assertEqual(table.identity.verticalScrollBar().value(), 150)
+        self.assertEqual(table.settings.verticalScrollBar().value(), 150)
+        self.assertEqual(table.settings.cellWidget(0, 0).count(), 2)
+        self.assertIn('고정 설명', self.window.definition_fields.horizontalHeaderItem(2).text())
+        self.assertEqual(self.window.definition_fields.item(0, 9).text(), '선택 A\n선택 B')
+
+    def test_m_line_labels_keep_spaces_and_blank_m_cannot_be_typed_into(self):
+        from test_icd import HEADERS, icd_row
+        from openpyxl import Workbook
+        from ds_simulator.icd import read_icd_sheet
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'm.xlsx'
+            book = Workbook(); sheet = book.active; sheet.title = '선택(데이터)'
+            sheet.append(HEADERS)
+            sheet.append(icd_row('0x1', '가상 선택', 1, '운용', '저속 운용\n고속  운용'))
+            sheet.append(icd_row(None, None, 2, '고정 항목', None))
+            book.save(path); book.close()
+            catalog = read_icd_sheet(path, sheet.title)
+        self.window.apply_catalog(catalog, '가상 선택')
+        self.window.message_catalog.setCurrentRow(0)
+        choice = self.window.payload_inputs['field_0001']
+        empty = self.window.payload_inputs['field_0002']
+        self.assertEqual([choice.itemText(i) for i in range(choice.count())], ['저속 운용', '고속  운용'])
+        self.assertFalse(choice.isEditable())
+        empty.setFocus(); QTest.keyClicks(empty, 'blocked')
+        self.assertEqual(empty.text(), '')
+        choice.setCurrentText('고속  운용')
+        self.window.toggle_preview_connection()
+        self.window.preview_send()
+        event = self.window.log_events[0]
+        self.assertEqual(event['values']['field_0001'], '고속  운용')
+        self.assertEqual(event['data_elements'][0]['fixed']['E'], '고정 0 1')
+        self.assertEqual(len(event['data_elements'][0]['fixed']), 9)
+
     def test_excel_formula_opcode_uses_saved_result_in_list_and_mock_send(self):
         from openpyxl import Workbook
-        from test_icd import set_formula_caches
+        from test_icd import set_formula_caches, HEADERS, icd_row
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'formula.xlsx'
             book = Workbook(); sheet = book.active; sheet.title = '수식(데이터)'
-            sheet.append(['opcode', '연동자료명', '순번', '데이터 요소', '상세 값'])
-            sheet.append(['="0x00A1"', '가상 수식 설정', 1, '운용 모드', 'OFF ON AUTO'])
+            sheet.append(HEADERS)
+            sheet.append(icd_row('="0x00A1"', '가상 수식 설정', 1, '운용 모드', 'OFF\nON\nAUTO'))
             book.save(path); book.close()
             set_formula_caches(path, {'A2': ('str', '0x00A1')})
             self.choose_excel_sheet(path)
@@ -394,9 +458,21 @@ class GuiTests(unittest.TestCase):
             self.window.apply_catalog(catalog, '가상 선택 시트')
             editor = self.window.scenario_editor
             editor.palette.setCurrentRow(2); editor.add_selected()
-            choices = editor.properties.findChildren(QComboBox)
-            enum = next(w for w in choices if w.findText('HIGH') >= 0)
-            enum.setCurrentText('HIGH')
+            from ds_simulator.icd_widgets import IcdFieldTable
+            from PySide6.QtWidgets import QDialog
+            step = editor.tree.currentItem().data(0, ROLE)
+            readonly = []
+            def choose():
+                dialog = next(w for w in APP.topLevelWidgets() if isinstance(w, QDialog) and w.isVisible())
+                try:
+                    table = dialog.findChild(IcdFieldTable)
+                    table.inputs['field_0001'].setCurrentText('HIGH')
+                    readonly.append(table.inputs['field_0002'].isReadOnly())
+                finally:
+                    dialog.accept()
+            QTimer.singleShot(30, choose)
+            editor.edit_icd_table(step, catalog[step.message])
+            self.assertEqual(readonly, [True])
             output = Path(directory) / 'scenario.json'
             editor.save_to(output)
             with patch('sys.excepthook') as exceptions:

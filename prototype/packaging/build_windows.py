@@ -100,8 +100,9 @@ def main():
         book = Workbook()
         sheet = book.active
         sheet.title = '가상 장치(데이터)'
-        sheet.append(['opcode', '연동자료명', '순번', '데이터 요소', '데이터 상세 값'])
-        sheet.append(['="0x0001"', '가상 모드 설정', 1, '운용 모드', '중지 실행 자동'])
+        sheet.append(['opcode', '연동자료명', '순번', '데이터 요소', '고정 설명', '가상 자료형', '가상 크기', '가상 최소', '가상 최대', '가상 초기', '고정 비고', '미사용', '선택값'])
+        sheet.append(['="0x0001"', '가상 모드 설정', 1, '운용 모드', '고정 0 1', 'uint8', 1, 0, 255, 0, '원본 유지', None,
+                      '="중지 상태"&CHAR(10)&"자동 운용"'])
         book.save(workbook_path)
         book.close()
         # Synthetic fixture only: simulate Excel's saved string formula result.
@@ -113,9 +114,10 @@ def main():
                 if item.filename == 'xl/worksheets/sheet1.xml':
                     namespace = '{http://schemas.openxmlformats.org/spreadsheetml/2006/main}'
                     root = ET.fromstring(content)
-                    cell = next(c for c in root.iter(namespace + 'c') if c.attrib['r'] == 'A2')
-                    cell.set('t', 'str')
-                    cell.find(namespace + 'v').text = '0x0001'
+                    for cell in root.iter(namespace + 'c'):
+                        if cell.attrib['r'] in ('A2', 'M2'):
+                            cell.set('t', 'str')
+                            cell.find(namespace + 'v').text = '0x0001' if cell.attrib['r'] == 'A2' else '중지 상태\n자동 운용'
                     content = ET.tostring(root, encoding='utf-8')
                 archive.writestr(item, content)
         screenshot = Path(directory) / 'excel-import.png'
@@ -126,7 +128,7 @@ def main():
             raise RuntimeError('Standalone EXE failed to import the synthetic Excel ICD.')
         shutil.copy2(screenshot, validation / screenshot.name)
         report['frozen_smoke_checks'].append({'page': 'excel-import', 'result': 'passed', 'standalone_copy': True,
-                                             'saved_formula_result': True})
+                                             'saved_formula_result': True, 'icd_layout': 'C:K-fixed/M-newline'})
 
     (validation / 'build-info.json').write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
     with executable.open('rb') as stream:

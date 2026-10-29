@@ -57,7 +57,7 @@ class MockTransport(QObject):
             "values": values, "big_endian": step.big_endian,
         }
         if isinstance(message, IcdMessage):
-            event['data_elements'] = [{'sequence': field.sequence, 'name': field.name, 'value': values[field.key]} for field in message.elements]
+            event['data_elements'] = message.event_elements(values)
         self.sent.emit(event)
         return event
 

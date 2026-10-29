@@ -13,7 +13,7 @@
 수신은 자동으로 LIVE 로그에 들어갑니다. TCP 한 로그는 최대 64KiB 읽기 조각, UDP 한 로그는 데이터그램입니다. ICD 경계를 추정하지 않습니다.
 TCP 읽기 버퍼 1MB, 송신 대기 버퍼 1MB, 서버당 클라이언트 64개, 한 번 송신 64KiB(UDP 65,507B) 제한입니다. 고속 수신은 별도 설계가 필요합니다.
 TX 상태 QUEUED/OS_ACCEPTED는 송신 버퍼/운영체제 접수이지 상대 수신 보장이 아닙니다.
-현재 Excel A~E만으로는 바이너리 ICD를 만들 수 없으므로 실제 모드의 기존 ICD send 블록은 사전 거부합니다. 임의 JSON·바이트 헤더를 장치로 보내지 않습니다.
+현재 Excel 열 정보만으로는 바이너리 ICD를 만들 수 없으므로 실제 모드의 기존 ICD send 블록은 사전 거부합니다. 임의 JSON·바이트 헤더를 장치로 보내지 않습니다.
 `Step(kind='raw', wire_format='hex'|'utf8', wire_data=...)`와 직접 송신 UI가 명시한 바이트만 전송합니다. raw 시나리오는 version 3, 기존 v1/2 호환을 유지합니다.
 수동/시나리오는 같은 전송 계층을 사용하며 실행 시작 시 대상 소켓 ID를 고정합니다. 재접속으로 ID가 바뀌면 기존 블록을 재선택해야 합니다.
 `network_check.py`는 패키징 전용 CLI `--network-self-test REPORT`로 Qt와 Python socket 사이의 실제 루프백을 검사합니다. 회사 파일/실장비를 사용하지 않습니다.
@@ -36,7 +36,7 @@ TX 상태 QUEUED/OS_ACCEPTED는 송신 버퍼/운영체제 접수이지 상대 �
 
 ## Windows 패키징
 
-`.github/workflows/windows-executable.yml`은 Windows x64에서 76개 테스트를 실행하고
+`.github/workflows/windows-executable.yml`은 Windows x64에서 83개 테스트를 실행하고
 `packaging/build_windows.py`로 PyInstaller onefile EXE를 만듭니다. EXE 파일 하나만 새 임시 폴더에 복사하여
 workspace/scenario/logs/spectrum/excel-import PNG와 frozen EXE의 실제 TCP/UDP 루프백 왕복을 확인한 뒤 EXE·SHA-256을 GitHub prerelease에 올립니다.
 Python 설치, 압축 해제, 추가 폴더 없이 EXE 하나로 실행합니다.
@@ -71,10 +71,11 @@ Python 설치, 압축 해제, 추가 폴더 없이 EXE 하나로 실행합니다
 
 ## Excel ICD 가져오기
 
-`icd.py`는 openpyxl read-only로 선택한 `(데이터)` 워크시트의 2행부터 A~E열만 읽습니다.
-A=opcode, B=연동자료명, C=순번, D=데이터 요소, E=공백 구분 선택값입니다.
+`icd.py`는 선택한 `(데이터)` 워크시트의 2행부터 A~K·M을 읽습니다. L과 N 이후는 사용하지 않습니다.
+A=opcode, B=연동자료명, C=순번, D=데이터 요소입니다. C~K는 고정 정의이며 M만 줄바꿈 구분 선택값입니다.
+1행의 C~K 제목과 각 행 원문을 보존합니다. M은 빈 줄을 제외하고 항목 안의 띄어쓰기를 유지합니다.
 같은 메시지의 빈 A/B와 병합 셀을 이어 읽고, 새 opcode의 이름이 없으면 잘못 이어 붙이지 않고 행 번호를 안내합니다.
-데이터 타입·바이트 길이·선택값의 숫자 의미를 추정하지 않습니다. E가 비면 자유 텍스트입니다.
+데이터 타입·바이트 길이·선택값의 숫자 의미를 추정하지 않습니다. M이 비면 직접 입력을 막고 값은 빈 문자열로 유지하며 C~K는 보존합니다.
 수식은 실행하지 않고 formula/data-only read-only 뷰를 나란히 읽어 Excel이 저장한 계산 결과를 사용합니다.
 계산 결과가 없는 수식은 빈칸처럼 이어 붙이지 않고 재계산·저장을 안내합니다. Excel 오류 값도 거부합니다.
 문자열 빈 결과와 캐시 없는 수식을 구별하고 숫자 0 및 zero padding을 보존합니다.
@@ -84,9 +85,12 @@ A=opcode, B=연동자료명, C=순번, D=데이터 요소, E=공백 구분 선�
 활성 ICD는 `window.messages`에만 보관하며 전역 MESSAGES를 수정하지 않습니다.
 `IcdMixin.apply_catalog()`는 수동 목록과 정의 화면을 교체하고 기본적으로 시나리오를 새 시험으로 만듭니다.
 사용자 파일 선택·시트 선택 취소와 파싱 실패는 기존 상태를 유지합니다. 실행 중인 시나리오가 있으면 가져오기를 막습니다.
-수동/시나리오 모두 `icd_widgets.py`의 입력을 사용합니다. 가져온 메시지는 SRC/DST를 임의로 채우지 않고 opcode만 정의로 사용합니다.
-도메인 함수와 MockTransport는 카탈로그를 주입받습니다. 로그에는 연동자료명과 이름이 있는 data_elements도 기록합니다.
-시나리오 version 2/3은 가져온 ICD 정의와 fingerprint를 포함합니다. version 1 기본 예시와 호환됩니다.
+수동/시나리오 모두 `icd_widgets.py`의 IcdFieldTable을 사용합니다.
+C/D와 M을 양쪽에 고정한 3개 table view가 세로 스크롤을 공유하고 E~K만 가로 스크롤합니다. 시나리오는 넓은 모달 표에서 편집합니다.
+C~K는 ItemIsEditable과 편집 트리거를 막고 M만 비편집형 콤보로 선택합니다. 빈 M은 read-only이며 모델 검사에서도 임의 값을 거부합니다. 가져온 메시지는 SRC/DST를 임의로 채우지 않고 opcode만 정의로 사용합니다.
+도메인 함수와 MockTransport는 카탈로그를 주입받습니다. 로그에는 연동자료명과 이름이 있는 data_elements도 기록합니다. fixed는 C~K 원본, value는 M 선택값입니다.
+시나리오 version 2/3은 가져온 ICD 정의와 fingerprint를 포함합니다. 새 catalog version 2는 fixed_headers와 field.fixed(C~K)를 저장합니다.
+이전 E열 catalog version 1도 원래 의미와 fingerprint를 보존하여 읽되 UI에 이전 형식이라고 표시합니다. 새 규칙은 Excel 재가져오기가 필요합니다. version 1 기본 예시와 호환됩니다.
 JSON 로드 시 카탈로그도 복원하며 트리 재구성 중 선택 신호를 막아 이전 ICD 콜백이 남지 않도록 합니다.
 원본 파일을 복사하거나 네트워크로 올리지 않습니다. 사용자가 선택한 시나리오 저장에는 ICD 내용이 포함되며 기존 2MB 제한이 있습니다.
 
@@ -94,7 +98,7 @@ JSON 로드 시 카탈로그도 복원하며 트리 재구성 중 선택 신호�
 
 1. Windows에서 화면 크기, 드래그 이동, 네이티브 파일 대화상자를 수동 검토합니다.
 2. 사용자가 공유 가능한 메타데이터로 필드 길이·타입·순서·엔디언·프레이밍을 확정합니다. 실제 회사 Excel을 요청하거나 저장소에 포함하지 마세요.
-3. 현재 A~E열 가져오기 모델을 확장하고 장치 규격에 맞는 ICD 인코더·디코더를 추가합니다.
+3. 현재 C~K 고정/M 선택 모델을 기준으로 장치 규격에 맞는 ICD 인코더·디코더를 추가합니다.
 4. 모의 상대와 실제 TCP/UDP를 검증한 뒤 시나리오에 응답 대기·판정을 추가합니다.
 5. 실제 스펙트럼 형식과 계측기 명령을 받은 뒤 해당 기능을 구현합니다.
 
@@ -112,7 +116,7 @@ UDP IPv4 단일 페이로드 최대 65,507바이트이므로 64KiB 메시지는 
 고속 수신은 수신/해석/저장/화면 갱신 분리 및 실제 Windows 부하 시험이 필요합니다.
 
 검증: `QT_QPA_PLATFORM=offscreen uv run python -m unittest discover -s tests -v`
-실제 루프백 15개를 포함해 76개 테스트가 있으며 Linux Qt offscreen에서 통과했습니다.
+실제 루프백 15개를 포함해 83개 테스트가 있으며 Linux Qt offscreen에서 통과했습니다.
 현재 UI 캡처: `docs/prototype-workspace.png`, `docs/prototype-scenario.png`.
 Windows 대화형 수동 조작·실장비·10G·FFT·계측기 검증은 아직 수행하지 않았습니다.
 Windows CI에서 전체 테스트와 frozen EXE의 offscreen 실행을 검사합니다.

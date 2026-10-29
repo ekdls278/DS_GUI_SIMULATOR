@@ -1,4 +1,4 @@
-"""Local-only A:E Excel ICD import. No workbook contents are uploaded or evaluated."""
+"""Local ICD import: C:K fixed definitions and newline-delimited M choices."""
 from dataclasses import asdict, dataclass
 import hashlib
 import json
@@ -11,6 +11,9 @@ from zipfile import BadZipFile
 from xml.etree.ElementTree import ParseError
 from defusedxml.common import DefusedXmlException
 
+FIXED_COLUMNS = tuple('CDEFGHIJK')
+DEFAULT_FIXED_HEADERS = ('순번', '데이터 요소', *(f'ICD 값 {letter}' for letter in 'EFGHIJK'))
+
 
 @dataclass(frozen=True)
 class IcdField:
@@ -19,6 +22,7 @@ class IcdField:
     name: str
     choices: tuple[str, ...]
     default: str
+    fixed: tuple[str, ...] = ()
 
     @property
     def label(self):
@@ -32,6 +36,11 @@ class IcdMessage:
     elements: tuple[IcdField, ...]
     src: str = ''
     dst: str = ''
+    fixed_headers: tuple[str, ...] = ()
+
+    @property
+    def current_layout(self):
+        return bool(self.fixed_headers)
 
     @property
     def cmd(self):
@@ -39,10 +48,21 @@ class IcdMessage:
 
     @property
     def fields(self):
-        return tuple((f.key, '선택' if f.choices else '텍스트', f.default, '—', f.label) for f in self.elements)
+        return tuple((f.key, '선택' if f.choices else ('변경 불가' if self.current_layout else '텍스트'), f.default, '—', f.label) for f in self.elements)
 
     def field_rows(self):
+        if self.current_layout:
+            return [[*f.fixed, '\n'.join(f.choices)] for f in self.elements]
         return [[f.sequence, f.name, '선택' if f.choices else '직접 입력', ' / '.join(f.choices), f.default] for f in self.elements]
+
+    def event_elements(self, values):
+        rows = []
+        for field in self.elements:
+            item = {'sequence': field.sequence, 'name': field.name, 'value': values[field.key]}
+            if self.current_layout:
+                item['fixed'] = dict(zip(FIXED_COLUMNS, field.fixed))
+            rows.append(item)
+        return rows
 
 
 def message_id(opcode, name):
@@ -67,7 +87,7 @@ def data_sheet_names(path):
         book.close()
 
 
-def _cell_text(cell, cached_cell=None):
+def _cell_text(cell, cached_cell=None, *, strip=True):
     if cell.data_type == 'f':
         # Excel stores the last calculated result separately from the formula.
         # Keep the formula view to distinguish an absent cache from a blank cell.
@@ -89,7 +109,7 @@ def _cell_text(cell, cached_cell=None):
         # Preserve explicit Excel zero padding without guessing decimal vs hexadecimal.
         if isinstance(value, int) and re.fullmatch(r'0+', cell.number_format or ''):
             return f'{value:0{len(cell.number_format)}d}'
-    return str(value).strip()
+    return str(value).strip() if strip else str(value)
 
 
 def read_icd_sheet(path, sheet_name):
@@ -106,11 +126,20 @@ def read_icd_sheet(path, sheet_name):
         groups = {}
         nonempty_rows = 0
         opcode = name = ''
-        rows = zip(sheet.iter_rows(min_row=2, max_col=5),
-                   cached_sheet.iter_rows(min_row=2, max_col=5), strict=True)
+        rows = zip(sheet.iter_rows(min_row=1, max_col=13),
+                   cached_sheet.iter_rows(min_row=1, max_col=13), strict=True)
+        header_row = next(rows, None)
+        if header_row is None:
+            raise ValueError('선택한 시트에 ICD 데이터가 없습니다.')
+        header, cached_header = header_row
+        headers = tuple(_cell_text(header[i], cached_header[i]) or DEFAULT_FIXED_HEADERS[i - 2] for i in range(2, 11))
         for row_number, (cells, cached_cells) in enumerate(rows, 2):
-            a, b, sequence, element, details = [_cell_text(cell, cached) for cell, cached in zip(cells, cached_cells)]
-            if not any((a, b, sequence, element, details)):
+            a, b = [_cell_text(cells[i], cached_cells[i]) for i in (0, 1)]
+            fixed = tuple(_cell_text(cells[i], cached_cells[i], strip=False) for i in range(2, 11))
+            sequence, element = fixed[0], fixed[1].strip()
+            # L is deliberately ignored; M labels keep all spaces within a line.
+            choices_text = _cell_text(cells[12], cached_cells[12], strip=False)
+            if not any(text.strip() for text in (a, b, *fixed, choices_text)):
                 continue
             nonempty_rows += 1
             if nonempty_rows > 50000:
@@ -127,19 +156,19 @@ def read_icd_sheet(path, sheet_name):
             if key not in groups:
                 groups[key] = [opcode, name, []]
             if not element:
-                if sequence or details:
+                if any(text.strip() for text in (fixed[0], *fixed[2:], choices_text)):
                     raise ValueError(f'{row_number}행: D열 데이터 요소가 없습니다.')
                 continue
-            choices = tuple(dict.fromkeys(details.split()))
+            choices = tuple(dict.fromkeys(line.strip() for line in choices_text.splitlines() if line.strip()))
             if len(choices) > 1000:
                 raise ValueError(f'{row_number}행: 선택값은 최대 1,000개입니다.')
             fields = groups[key][2]
-            fields.append(IcdField(f'field_{len(fields) + 1:04}', sequence, element, choices, choices[0] if choices else ''))
+            fields.append(IcdField(f'field_{len(fields) + 1:04}', sequence, element, choices, choices[0] if choices else '', fixed))
         if not groups:
-            raise ValueError('선택한 시트의 2행 이후 A~E열에 ICD 데이터가 없습니다.')
+            raise ValueError('선택한 시트의 2행 이후 A~K·M열에 ICD 데이터가 없습니다.')
         if len(groups) > 10000:
             raise ValueError('한 시트는 최대 10,000개 메시지를 지원합니다.')
-        return {key: IcdMessage(opcode, name, tuple(fields)) for key, (opcode, name, fields) in groups.items()}
+        return {key: IcdMessage(opcode, name, tuple(fields), fixed_headers=headers) for key, (opcode, name, fields) in groups.items()}
     except (BadZipFile, ParseError, DefusedXmlException) as exc:
         raise ValueError('선택한 시트의 데이터를 읽을 수 없습니다. Excel 파일을 확인하세요.') from exc
     finally:
@@ -150,16 +179,30 @@ def read_icd_sheet(path, sheet_name):
 
 def catalog_payload(messages):
     rows = []
+    current = all(isinstance(message, IcdMessage) and message.current_layout for message in messages.values())
     for key, message in messages.items():
         if not isinstance(message, IcdMessage):
             raise ValueError('가져온 ICD 정의만 저장할 수 있습니다.')
-        rows.append({'id': key, 'opcode': message.opcode, 'name': message.description, 'fields': [{**asdict(field), 'choices': list(field.choices)} for field in message.elements]})
+        if message.current_layout != current:
+            raise ValueError('서로 다른 Excel 열 형식의 ICD를 섞어 저장할 수 없습니다.')
+        fields = []
+        for field in message.elements:
+            data = {**asdict(field), 'choices': list(field.choices)}
+            if current:
+                data['fixed'] = list(field.fixed)
+            else:
+                data.pop('fixed')  # Preserve version 1 catalogs and their fingerprints.
+            fields.append(data)
+        row = {'id': key, 'opcode': message.opcode, 'name': message.description, 'fields': fields}
+        if current:
+            row['fixed_headers'] = list(message.fixed_headers)
+        rows.append(row)
     canonical = json.dumps(rows, sort_keys=True, ensure_ascii=False, separators=(',', ':'))
-    return {'format': 'ds-icd-catalog', 'version': 1, 'fingerprint': hashlib.sha256(canonical.encode('utf-8')).hexdigest(), 'messages': rows}
+    return {'format': 'ds-icd-catalog', 'version': 2 if current else 1, 'fingerprint': hashlib.sha256(canonical.encode('utf-8')).hexdigest(), 'messages': rows}
 
 
 def catalog_from_payload(payload):
-    if not isinstance(payload, dict) or payload.get('format') != 'ds-icd-catalog' or type(payload.get('version')) is not int or payload['version'] != 1:
+    if not isinstance(payload, dict) or payload.get('format') != 'ds-icd-catalog' or type(payload.get('version')) is not int or payload['version'] not in (1, 2):
         raise ValueError('지원하지 않는 ICD 정의 형식입니다.')
     rows = payload.get('messages')
     if not isinstance(rows, list) or not 1 <= len(rows) <= 10000:
@@ -169,6 +212,10 @@ def catalog_from_payload(payload):
     try:
         for row in rows:
             opcode, name, fields = row['opcode'], row['name'], row['fields']
+            current = payload['version'] == 2
+            headers = row['fixed_headers'] if current else []
+            if not isinstance(headers, list) or (current and (len(headers) != 9 or not all(isinstance(v, str) and v for v in headers))):
+                raise ValueError('C~K열 제목 구성을 확인하세요.')
             if not isinstance(opcode, str) or not opcode or not isinstance(name, str) or not name or not isinstance(fields, list):
                 raise ValueError('opcode·연동자료명·데이터 요소 구성을 확인하세요.')
             key = message_id(opcode, name)
@@ -185,9 +232,13 @@ def catalog_from_payload(payload):
                     raise ValueError('ICD 선택값 구성이 올바르지 않습니다.')
                 if not field['key'] or field['key'] in seen or not field['name'] or (choices and field['default'] not in choices):
                     raise ValueError('ICD 필드 ID 또는 초기값을 확인하세요.')
+                fixed = field['fixed'] if current else []
+                if not isinstance(fixed, list) or (current and (len(fixed) != 9 or not all(isinstance(v, str) for v in fixed)
+                        or fixed[0] != field['sequence'] or fixed[1].strip() != field['name'] or (not choices and field['default'] != ''))):
+                    raise ValueError('C~K 고정 정의 또는 M열 초기값을 확인하세요.')
                 seen.add(field['key'])
-                elements.append(IcdField(field['key'], field['sequence'], field['name'], tuple(choices), field['default']))
-            result[key] = IcdMessage(opcode, name, tuple(elements))
+                elements.append(IcdField(field['key'], field['sequence'], field['name'], tuple(choices), field['default'], tuple(fixed)))
+            result[key] = IcdMessage(opcode, name, tuple(elements), fixed_headers=tuple(headers))
     except (KeyError, TypeError, AttributeError):
         raise ValueError('ICD 정의 파일 구조가 올바르지 않습니다.') from None
     if catalog_payload(result)['fingerprint'] != payload.get('fingerprint'):

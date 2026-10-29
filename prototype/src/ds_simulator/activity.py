@@ -180,7 +180,7 @@ class ActivityMixin:
         values = validate_message(step.message, step.headers, step.values, self.messages)
         event = {"time": datetime.now().astimezone().isoformat(timespec="milliseconds"), "mode": "MOCK", "direction": "RX", "source": "수신 예시 버튼", "connection_id": connection.identifier, "socket_id": socket.identifier, "peer": peer, "message": message.description if isinstance(message, IcdMessage) else name, "message_id": name, "headers": step.headers, "values": values, "big_endian": False}
         if isinstance(message, IcdMessage):
-            event['data_elements'] = [{'sequence': field.sequence, 'name': field.name, 'value': values[field.key]} for field in message.elements]
+            event['data_elements'] = message.event_elements(values)
         self.record_event(event)
 
 

@@ -2,7 +2,7 @@
 
 **조작 가능한 기본 프로토타입:** [prototype/README.md](prototype/README.md)
 
-실제 TCP/UDP·HEX/UTF-8 송수신·Excel ICD 시트 가져오기·블록 편집·모의 실행·실시간 통신 모니터·전용 로그·스펙트럼 독립 창이 추가된 버전은 `prototype/`에 있습니다.
+C~K 고정/M 선택 표·실제 TCP/UDP·HEX/UTF-8 송수신·Excel ICD 시트 가져오기·블록 편집·모의 실행·실시간 통신 모니터·전용 로그·스펙트럼 독립 창이 추가된 버전은 `prototype/`에 있습니다.
 **[실행 파일 ZIP 다운로드 — 저장소에 포함](https://github.com/ekdls278/DS_GUI_SIMULATOR/raw/refs/heads/main/prototype/DS-Simulator-Windows-x64.zip)**
 
 ZIP에는 단독 실행 가능한 `DS-Simulator.exe` 하나만 들어 있습니다. 압축을 풀고 EXE를 더블클릭하세요.

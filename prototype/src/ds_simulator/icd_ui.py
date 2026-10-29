@@ -1,9 +1,10 @@
 """Excel sheet chooser and the live ICD definition page."""
 from pathlib import Path
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QDialog, QDialogButtonBox, QFileDialog, QHBoxLayout, QListWidget, QMessageBox, QTableWidgetItem, QVBoxLayout
 
-from .icd import IcdMessage, data_sheet_names, read_icd_sheet
+from .icd import IcdMessage, FIXED_COLUMNS, data_sheet_names, read_icd_sheet
 from .widgets import Card, button, label, row, table
 
 
@@ -18,7 +19,7 @@ class SheetSelectionDialog(QDialog):
         self.sheets.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
         self.sheets.addItems(names)
         body.addWidget(self.sheets, 1)
-        note = label('선택한 시트의 A~E열, 2행부터 읽습니다.\n확인하면 ICD 목록을 교체하고 시나리오는 새 시험으로 초기화합니다.', 'caption')
+        note = label('2행부터 A·B로 메시지를 구분하고 C~K는 고정 정의, M은 줄바꿈 구분 선택값으로 읽습니다.\n확인하면 ICD 목록을 교체하고 시나리오는 새 시험으로 초기화합니다.', 'caption')
         note.setWordWrap(True)
         body.addWidget(note)
         self.actions = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
@@ -53,7 +54,7 @@ class IcdMixin:
         self.definition_source = label(self.catalog_source, 'muted')
         self.definition_source.setWordWrap(True)
         source.body.addWidget(self.definition_source)
-        source.body.addWidget(label('E열의 공백 구분 항목은 선택값으로 사용합니다. 선택값이 없으면 직접 입력합니다.', 'caption'))
+        source.body.addWidget(label('C~K는 고정된 ICD 정의입니다. M열의 줄바꿈 구분 항목만 사용자 설정값으로 선택합니다.', 'caption'))
         layout.addWidget(source)
         panels = QHBoxLayout()
         catalog = Card('opcode · 연동자료명')
@@ -69,7 +70,7 @@ class IcdMixin:
         self.definition_fields = table(['순번', '데이터 요소', '입력 방식', '선택 가능 값', '초기값'], [], stretch_column=3)
         self.definition_fields.setMinimumHeight(360)
         detail.body.addWidget(self.definition_fields, 1)
-        detail.body.addWidget(label('A~E열만으로는 바이트 길이·타입·엔디언을 확정하지 않습니다. 현재 송수신은 모의 동작입니다.', 'caption'))
+        detail.body.addWidget(label('이 화면은 원본 정의를 조회합니다. M 선택값은 메시지 편집·송신에서 변경하세요. 실제 통신은 HEX/UTF-8 직접 송수신을 지원합니다.', 'caption'))
         panels.addWidget(detail, 7)
         layout.addLayout(panels, 1)
         self.definition_catalog.itemSelectionChanged.connect(self.show_definition)
@@ -99,12 +100,19 @@ class IcdMixin:
         self.definition_note.setText(f'opcode {message.cmd} · 데이터 요소 {len(message.fields)}개')
         if isinstance(message, IcdMessage):
             rows = message.field_rows()
+            headers = ([f'{letter} · {title}' for letter, title in zip(FIXED_COLUMNS, message.fixed_headers)] + ['M · 선택 가능 값']) if message.current_layout else ['순번', '데이터 요소', '입력 방식 (이전 E열)', '선택 가능 값', '초기값']
         else:
             rows = [[str(index), description, data_type, unit if unit != '—' else '', value] for index, (_, data_type, value, unit, description) in enumerate(message.fields, 1)]
+            headers = ['순번', '데이터 요소', '자료형', '단위', '초기값']
+        self.definition_fields.setColumnCount(len(headers))
+        self.definition_fields.setHorizontalHeaderLabels(headers)
         self.definition_fields.setRowCount(len(rows))
         for row_index, values in enumerate(rows):
             for column, value in enumerate(values):
                 self.definition_fields.setItem(row_index, column, QTableWidgetItem(value))
+                self.definition_fields.item(row_index, column).setToolTip(value)
+                self.definition_fields.item(row_index, column).setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+            self.definition_fields.setRowHeight(row_index, max(36, min(96, max(value.count('\n') + 1 for value in values) * 18 + 12)))
 
     def apply_catalog(self, messages, source, reset_scenario=True):
         if self.scenario_editor.runner.running:

@@ -42,7 +42,9 @@ def validate_message(name, headers, values, catalog=None):
             raise ValueError('데이터 요소 구성이 선택한 ICD와 일치하지 않습니다.')
         for field in message.elements:
             if not isinstance(values[field.key], str) or (field.choices and values[field.key] not in field.choices):
-                raise ValueError(f'{field.label}: E열에 정의된 선택값을 사용하세요.')
+                raise ValueError(f"{field.label}: {'M열' if message.current_layout else '이전 E열'}에 정의된 선택값을 사용하세요.")
+            if message.current_layout and not field.choices and values[field.key] != field.default:
+                raise ValueError(f'{field.label}: M열에 선택값이 없어 변경할 수 없습니다.')
         return dict(values)
     for key, value in headers.items():
         if not isinstance(value, str) or not re.fullmatch(r"0[xX][0-9a-fA-F]+", value):

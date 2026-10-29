@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
 from .preview_data import SocketPreview
 from .domain import Step, validate_message
 from .icd import IcdMessage
-from .icd_widgets import make_field_input, input_value, connect_input
+from .icd_widgets import make_field_input, input_value, connect_input, IcdFieldTable
 from .connection_cards import ConnectionCard
 from .theme import BLUE
 from .widgets import Card, button, chip, label, row
@@ -264,6 +264,7 @@ class WorkspaceMixin:
         self.payload_form.setVerticalSpacing(9)
         editor_layout.addLayout(self.payload_form)
         self.payload_inputs = {}
+        self.payload_table = None
         card.body.addWidget(self.editor)
         card.body.addStretch()
         self.send_feedback = label("", "caption")
@@ -324,6 +325,7 @@ class WorkspaceMixin:
         while self.payload_form.rowCount():
             self.payload_form.removeRow(0)
         self.payload_inputs.clear()
+        self.payload_table = None
         self.message_title.setText("ICD 메시지를 선택하세요")
         self.message_description.setText("선택한 메시지의 필드가 여기에 표시됩니다.")
         self.send_feedback.clear()
@@ -338,19 +340,32 @@ class WorkspaceMixin:
         self.message_title.setText(message.description)
         self.message_description.setText(f"opcode {message.cmd}  ·  데이터 요소 {len(message.fields)}개")
         imported = isinstance(message, IcdMessage)
+        if imported:
+            self.big_endian.setChecked(False)
         self.header_editor.setVisible(not imported)
-        self.header_note.setText("Excel의 선택값을 그대로 사용합니다. 실제 패킷 형식은 아직 정의하지 않았습니다." if imported else "DST는 ICD 식별자입니다. 송신 소켓은 왼쪽에서 선택합니다.")
+        if imported:
+            self.header_note.setText('C~K는 ICD 원본 정의입니다. M열에서 줄바꿈으로 구분한 항목만 변경할 수 있습니다.' if message.current_layout else
+                                     '이전 E열 형식의 저장본입니다. C~K 고정·M 선택 규칙을 쓰려면 Excel을 다시 가져오세요.')
+        else:
+            self.header_note.setText('DST는 ICD 식별자입니다. 송신 소켓은 왼쪽에서 선택합니다.')
         for key, edit in self.header_inputs.items():
             edit.setText(getattr(message, key))
         while self.payload_form.rowCount():
             self.payload_form.removeRow(0)
         self.payload_inputs.clear()
-        for key, data_type, value, unit, description in message.fields:
-            edit = make_field_input(message, key, value)
-            connect_input(edit, self.update_send_button)
-            edit.setToolTip(f"{description} · {data_type}" if imported else f"{key} · {data_type} · 화면 예시")
-            self.payload_inputs[key] = edit
-            self.payload_form.addRow(label(description, "muted"), row(edit, label(unit, "caption")) if unit != "—" else edit)
+        self.payload_table = None
+        if imported:
+            values = {field.key: field.default for field in message.elements}
+            self.payload_table = IcdFieldTable(message, values, lambda *_: self.update_send_button())
+            self.payload_inputs.update(self.payload_table.inputs)
+            self.payload_form.addRow(self.payload_table)
+        else:
+            for key, data_type, value, unit, description in message.fields:
+                edit = make_field_input(message, key, value)
+                connect_input(edit, self.update_send_button)
+                edit.setToolTip(f'{key} · {data_type} · 화면 예시')
+                self.payload_inputs[key] = edit
+                self.payload_form.addRow(label(description, 'muted'), row(edit, label(unit, 'caption')) if unit != '—' else edit)
         self.send_feedback.clear()
         self.update_send_button()
 
@@ -390,7 +405,7 @@ class WorkspaceMixin:
         self.raw_editor.setVisible(raw)
         self.raw_note.setVisible(raw)
         self.raw_ending.setVisible(self.send_format.currentData() == 'utf8')
-        self.big_endian.setVisible(not raw)
+        self.big_endian.setVisible(not raw and not isinstance(self.messages.get(self.selected_message_name), IcdMessage))
         self.catalog_hint.setText("메시지를 선택해 데이터 요소를 편집하세요." if ready else "조회·편집은 가능합니다. 송신하려면 연결과 대상을 선택하세요.")
         valid = ready and (raw or self.selected_message_name is not None)
         error = ""
