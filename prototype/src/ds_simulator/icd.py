@@ -11,6 +11,7 @@ from zipfile import BadZipFile
 from xml.etree.ElementTree import ParseError
 from defusedxml.common import DefusedXmlException
 
+# 고정 열 구성을 바꾸면 read_icd_sheet의 추출 범위와 catalog_from_payload의 저장본 검증도 확인한다.
 FIXED_COLUMNS = tuple('CDEFGHIJK')
 DEFAULT_FIXED_HEADERS = ('순번', '데이터 요소', *(f'ICD 값 {letter}' for letter in 'EFGHIJK'))
 
@@ -82,6 +83,7 @@ def _book(path, *, data_only=False):
 def data_sheet_names(path):
     book = _book(path)
     try:
+        # 시트 이름 규칙은 read_icd_sheet 첫 검사의 접미사와 맞춘다.
         return [sheet.title for sheet in book.worksheets if sheet.title.rstrip().endswith('(데이터)')]
     finally:
         book.close()
@@ -126,6 +128,7 @@ def read_icd_sheet(path, sheet_name):
         groups = {}
         nonempty_rows = 0
         opcode = name = ''
+        # 1행은 열 제목, 2행부터는 데이터다. 수식과 저장된 계산값을 같은 좌표에서 읽도록 두 범위를 맞춘다.
         rows = zip(sheet.iter_rows(min_row=1, max_col=13),
                    cached_sheet.iter_rows(min_row=1, max_col=13), strict=True)
         header_row = next(rows, None)
@@ -134,16 +137,18 @@ def read_icd_sheet(path, sheet_name):
         header, cached_header = header_row
         headers = tuple(_cell_text(header[i], cached_header[i]) or DEFAULT_FIXED_HEADERS[i - 2] for i in range(2, 11))
         for row_number, (cells, cached_cells) in enumerate(rows, 2):
+            # A(0)는 opcode, B(1)는 연동자료명, C~K(2~10)는 고정 정의다. C는 순번, D는 요소명이다.
             a, b = [_cell_text(cells[i], cached_cells[i]) for i in (0, 1)]
             fixed = tuple(_cell_text(cells[i], cached_cells[i], strip=False) for i in range(2, 11))
             sequence, element = fixed[0], fixed[1].strip()
-            # L is deliberately ignored; M labels keep all spaces within a line.
+            # 예: 선택지를 M에서 N으로 옮기면 아래 두 인덱스는 13, 위 두 iter_rows의 max_col은 14로 바꾼다.
             choices_text = _cell_text(cells[12], cached_cells[12], strip=False)
             if not any(text.strip() for text in (a, b, *fixed, choices_text)):
                 continue
             nonempty_rows += 1
             if nonempty_rows > 50000:
                 raise ValueError('한 시트는 최대 50,000개 데이터 행을 지원합니다.')
+            # 병합 셀의 후속 행은 직전 opcode와 이름을 이어받는다. opcode가 바뀌면 새 이름이 필요하다.
             if a:
                 if a != opcode:
                     name = ''
@@ -152,6 +157,7 @@ def read_icd_sheet(path, sheet_name):
                 name = b
             if not opcode or not name:
                 raise ValueError(f'{row_number}행: opcode와 연동자료명이 필요합니다. 첫 행의 A·B열을 확인하세요.')
+            # 같은 opcode와 연동자료명을 가진 행들을 한 메시지로 묶는다. 이 ID는 저장본 복원에도 쓰인다.
             key = message_id(opcode, name)
             if key not in groups:
                 groups[key] = [opcode, name, []]
@@ -159,6 +165,7 @@ def read_icd_sheet(path, sheet_name):
                 if any(text.strip() for text in (fixed[0], *fixed[2:], choices_text)):
                     raise ValueError(f'{row_number}행: D열 데이터 요소가 없습니다.')
                 continue
+            # 줄바꿈으로 나눈 뒤 빈 줄과 중복을 제거한다. 첫 항목이 GUI 초기값이 된다.
             choices = tuple(dict.fromkeys(line.strip() for line in choices_text.splitlines() if line.strip()))
             if len(choices) > 1000:
                 raise ValueError(f'{row_number}행: 선택값은 최대 1,000개입니다.')
